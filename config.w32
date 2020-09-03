@@ -1,13 +1,5 @@
-// $Id$
-// vim:ft=javascript
-
-// If your extension references something external, use ARG_WITH
-// ARG_WITH("asynclog", "for asynclog support", "no");
-
-// Otherwise, use ARG_ENABLE
 ARG_ENABLE("asynclog", "enable asynclog support", "no");
 
 if (PHP_ASYNCLOG != "no") {
-	EXTENSION("asynclog", "asynclog.c", PHP_EXTNAME_SHARED, "/DZEND_ENABLE_STATIC_TSRMLS_CACHE=1");
+	EXTENSION("asynclog", "asynclog.c api.c", PHP_EXTNAME_SHARED, "/DZEND_ENABLE_STATIC_TSRMLS_CACHE=1");
 }
-

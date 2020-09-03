@@ -1,30 +1,15 @@
-/*
-  +----------------------------------------------------------------------+
-  | PHP Version 7                                                        |
-  +----------------------------------------------------------------------+
-  | Copyright (c) 1997-2018 The PHP Group                                |
-  +----------------------------------------------------------------------+
-  | This source file is subject to version 3.01 of the PHP license,      |
-  | that is bundled with this package in the file LICENSE, and is        |
-  | available through the world-wide-web at the following url:           |
-  | http://www.php.net/license/3_01.txt                                  |
-  | If you did not receive a copy of the PHP license and are unable to   |
-  | obtain it through the world-wide-web, please send a note to          |
-  | license@php.net so we can mail you a copy immediately.               |
-  +----------------------------------------------------------------------+
-  | Author:                                                              |
-  +----------------------------------------------------------------------+
-*/
-
-/* $Id$ */
-
 #ifndef PHP_ASYNCLOG_H
 #define PHP_ASYNCLOG_H
 
 extern zend_module_entry asynclog_module_entry;
 #define phpext_asynclog_ptr &asynclog_module_entry
 
-#define PHP_ASYNCLOG_VERSION "0.1.0" /* Replace with version number for your extension */
+#define PHP_ASYNCLOG_VERSION        "0.1.0"
+#define PHP_ASYNCLOG_LEVEL_ERROR    1<<0
+#define PHP_ASYNCLOG_LEVEL_WARN     1<<1
+#define PHP_ASYNCLOG_LEVEL_INFO     1<<2
+#define PHP_ASYNCLOG_LEVEL_DEBUG    1<<3
+#define PHP_ASYNCLOG_LEVEL_VERBOSE  1<<4
 
 #ifdef PHP_WIN32
 #	define PHP_ASYNCLOG_API __declspec(dllexport)
@@ -38,20 +23,27 @@ extern zend_module_entry asynclog_module_entry;
 #include "TSRM.h"
 #endif
 
-/*
-  	Declare any global variables you may need between the BEGIN
-	and END macros here:
+#ifdef ASYNCLOG_DEBUG
+#	define dprintf(...) php_printf(__VA_ARGS__)
+#	define hprintf(...) if(!sapi_module.phpinfo_as_text) php_printf(__VA_ARGS__);
+#else
+#	define dprintf(...) ((void)0)
+#	define hprintf(...) ((void)0)
+#endif
 
 ZEND_BEGIN_MODULE_GLOBALS(asynclog)
-	zend_long  global_value;
-	char *global_string;
+	double     reqtime;
+	double     restime;
+	zend_long  threads;
+	zend_long  type;
+	zend_long  redis_port;
+	char *filepath;
+	char *redis_host;
+	char *redis_auth;
+	char *elastic;
+	char *category;
 ZEND_END_MODULE_GLOBALS(asynclog)
-*/
 
-/* Always refer to the globals in your function as ASYNCLOG_G(variable).
-   You are encouraged to rename these macros something shorter, see
-   examples in any other php module directory.
-*/
 #define ASYNCLOG_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(asynclog, v)
 
 #if defined(ZTS) && defined(COMPILE_DL_ASYNCLOG)
