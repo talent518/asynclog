@@ -91,12 +91,19 @@ PHP_FUNCTION(asynclog) {
 		category = "application";
 	}
 
-	smart_str_0(&buf); /* copy? */
 	if (buf.s) {
+		smart_str_0(&buf);
+
+		SYSLOG("name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, buf.s->val, category);
+
 		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, buf.s->val, category);
 	} else {
+		SYSLOG("name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, "null", category);
+
 		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, "null", category);
 	}
+
+	SYSLOG();
 
 	smart_str_free(&buf);
 
