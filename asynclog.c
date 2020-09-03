@@ -1,32 +1,16 @@
-/*
-  +----------------------------------------------------------------------+
-  | PHP Version 7                                                        |
-  +----------------------------------------------------------------------+
-  | Copyright (c) 1997-2018 The PHP Group                                |
-  +----------------------------------------------------------------------+
-  | This source file is subject to version 3.01 of the PHP license,      |
-  | that is bundled with this package in the file LICENSE, and is        |
-  | available through the world-wide-web at the following url:           |
-  | http://www.php.net/license/3_01.txt                                  |
-  | If you did not receive a copy of the PHP license and are unable to   |
-  | obtain it through the world-wide-web, please send a note to          |
-  | license@php.net so we can mail you a copy immediately.               |
-  +----------------------------------------------------------------------+
-  | Author:                                                              |
-  +----------------------------------------------------------------------+
-*/
-
-/* $Id$ */
-
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
+#include <string.h>
+
 #include "php.h"
 #include "php_ini.h"
 #include "SAPI.h"
+#include "snprintf.h"
 #include "zend_smart_str.h"
 #include "standard/info.h"
+#include "standard/php_var.h"
 #include "json/php_json.h"
 
 #include "api.h"
@@ -109,9 +93,9 @@ PHP_FUNCTION(asynclog) {
 
 	smart_str_0(&buf); /* copy? */
 	if (buf.s) {
-		ret = strpprintf(0, "name: %s, level: %d, message: %s, data: %s, category: %s", name, level, message, buf.s->val, category);
+		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, buf.s->val, category);
 	} else {
-		ret = strpprintf(0, "name: %s, level: %d, message: %s, data: %s, category: %s", name, level, message, "null", category);
+		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, "null", category);
 	}
 
 	smart_str_free(&buf);
@@ -120,7 +104,9 @@ PHP_FUNCTION(asynclog) {
 }
 
 PHP_GINIT_FUNCTION(asynclog) {
-	dprintf("GINIT: asynclog\n");
+	OPENLOG();
+
+	SYSLOG("GINIT");
 
 	asynclog_globals->reqtime    = 0;
 	asynclog_globals->restime    = 0;
@@ -135,11 +121,13 @@ PHP_GINIT_FUNCTION(asynclog) {
 }
 
 PHP_GSHUTDOWN_FUNCTION(asynclog) {
-	dprintf("GSHUTDOWN: asynclog\n");
+	SYSLOG("GSHUTDOWN");
+
+	CLOSELOG();
 }
 
 PHP_MINIT_FUNCTION(asynclog) {
-	dprintf("MINIT: asynclog\n");
+	SYSLOG("MINIT");
 
 	REGISTER_INI_ENTRIES();
 
@@ -156,7 +144,7 @@ PHP_MINIT_FUNCTION(asynclog) {
 }
 
 PHP_MSHUTDOWN_FUNCTION(asynclog) {
-	dprintf("MSHUTDOWN: asynclog\n");
+	SYSLOG("MSHUTDOWN");
 
 	UNREGISTER_INI_ENTRIES();
 
@@ -164,14 +152,13 @@ PHP_MSHUTDOWN_FUNCTION(asynclog) {
 }
 
 PHP_RINIT_FUNCTION(asynclog) {
-	ASYNCLOG_G(reqtime) = microtime();
-
-	dprintf("RINIT: asynclog - %f\n", ASYNCLOG_G(reqtime));
-	hprintf("<hr/>");
-
 #if defined(COMPILE_DL_ASYNCLOG) && defined(ZTS)
 	ZEND_TSRMLS_CACHE_UPDATE();
 #endif
+
+	ASYNCLOG_G(reqtime) = microtime();
+
+	SYSLOG("RINIT: %f\n", ASYNCLOG_G(reqtime));
 
 	return SUCCESS;
 }
@@ -179,13 +166,103 @@ PHP_RINIT_FUNCTION(asynclog) {
 PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	ASYNCLOG_G(restime) = microtime();
 
-	hprintf("<hr/>");
-	dprintf("RSHUTDOWN: asynclog - %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
+	if (Z_TYPE(PG(http_globals)[TRACK_VARS_SERVER]) != IS_UNDEF) {
+		smart_str buf = {0};
+		HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
+		const char *ctlname;
+
+		// php_var_dump(_SERVER, 0);
+
+		if(!SG(request_info).request_uri) {
+			zval *prog, *argv, *argc, *arg0;
+			zend_long i;
+
+			prog = zend_hash_str_find(_SERVER, "_", sizeof("_")-1);
+			argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
+			argc = zend_hash_str_find(_SERVER, "argc", sizeof("argc")-1);
+
+			arg0 = zend_hash_index_find(Z_ARRVAL_P(argv), 0);
+
+			if(strcmp(Z_STRVAL_P(prog), Z_STRVAL_P(arg0))) {
+				smart_str_append_ex(&buf, Z_STR_P(prog), 0);
+				smart_str_appendc_ex(&buf, ' ', 0);
+			}
+
+			smart_str_appendc_ex(&buf, '\'', 0);
+			smart_str_append_ex(&buf, Z_STR_P(arg0), 0);
+			smart_str_appendc_ex(&buf, '\'', 0);
+
+			for(i=1; i<Z_LVAL_P(argc); i++) {
+				zval *tmp = zend_hash_index_find(Z_ARRVAL_P(argv), i);
+				smart_str_appendc_ex(&buf, ' ', 0);
+				smart_str_appendc_ex(&buf, '\'', 0);
+				smart_str_append_ex(&buf, Z_STR_P(tmp), 0);
+				smart_str_appendc_ex(&buf, '\'', 0);
+			}
+
+			ctlname = "COMMAND";
+		} else {
+			zval *method, *scheme, *host, *url, *user_agent;
+
+			method = zend_hash_str_find(_SERVER, "REQUEST_METHOD", sizeof("REQUEST_METHOD")-1);
+			scheme = zend_hash_str_find(_SERVER, "REQUEST_SCHEME", sizeof("REQUEST_SCHEME")-1);
+			host = zend_hash_str_find(_SERVER, "HTTP_HOST", sizeof("HTTP_HOST")-1);
+			url = zend_hash_str_find(_SERVER, "REQUEST_URI", sizeof("REQUEST_URI")-1);
+			user_agent = zend_hash_str_find(_SERVER, "HTTP_USER_AGENT", sizeof("HTTP_USER_AGENT")-1);
+
+			smart_str_append_ex(&buf, Z_STR_P(method), 0);
+			smart_str_appendc_ex(&buf, ' ', 0);
+			smart_str_append_ex(&buf, Z_STR_P(scheme), 0);
+			smart_str_appendl_ex(&buf, "://", 3, 0);
+			smart_str_append_ex(&buf, Z_STR_P(host), 0);
+			smart_str_append_ex(&buf, Z_STR_P(url), 0);
+			if(user_agent) {
+				smart_str_appendl_ex(&buf, " \"", 2, 0);
+				smart_str_append_ex(&buf, Z_STR_P(user_agent), 0);
+				smart_str_appendc_ex(&buf, '"', 0);
+			} else {
+				smart_str_appendl_ex(&buf, " \"-\"", 4, 0);
+			}
+
+			ctlname = "REQUEST";
+		}
+
+		smart_str_0(&buf);
+
+		SYSLOG("%s: %s", ctlname, ZSTR_VAL(buf.s));
+
+		smart_str_free(&buf);
+
+		if(SG(request_info).path_translated) {
+			SYSLOG("PATH_TRANSLATED: %s", SG(request_info).path_translated);
+		}
+		if(SG(request_info).request_uri) {
+			SYSLOG("REQUEST_URI: %s", SG(request_info).request_uri);
+			SYSLOG("CONTENT_TYPE: %s", SG(request_info).content_type);
+			SYSLOG("CONTENT_LENGTH: %ld", SG(request_info).content_length);
+
+			if(SG(request_info).request_body) {
+				zend_string *post_data_str = NULL;
+
+				php_stream_rewind(SG(request_info).request_body);
+				post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
+				if(post_data_str) {
+					SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
+				}
+			}
+		}
+	} else {
+		SYSLOG("REQUEST: -");
+	}
+
+	SYSLOG("RSHUTDOWN: %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
 
 	return SUCCESS;
 }
 
 PHP_MINFO_FUNCTION(asynclog) {
+	SYSLOG("MINFO");
+
 	php_info_print_table_start();
 	php_info_print_table_header(2, "asynclog support", "enabled");
 	php_info_print_table_end();

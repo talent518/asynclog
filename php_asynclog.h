@@ -24,11 +24,15 @@ extern zend_module_entry asynclog_module_entry;
 #endif
 
 #ifdef ASYNCLOG_DEBUG
-#	define dprintf(...) php_printf(__VA_ARGS__)
-#	define hprintf(...) if(!sapi_module.phpinfo_as_text) php_printf(__VA_ARGS__);
+#	include <syslog.h>
+#	include "SAPI.h"
+#	define OPENLOG()	openlog("asynclog", LOG_PID, LOG_USER)
+#	define SYSLOG(fmt, args...) syslog(LOG_USER, "%s -> " fmt, sapi_module.name, ##args)
+#	define CLOSELOG()	closelog()
 #else
-#	define dprintf(...) ((void)0)
-#	define hprintf(...) ((void)0)
+#	define OPENLOG() ((void)0)
+#	define SYSLOG(fmt, args...) ((void)0)
+#	define CLOSELOG() ((void)0)
 #endif
 
 ZEND_BEGIN_MODULE_GLOBALS(asynclog)
