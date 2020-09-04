@@ -103,8 +103,6 @@ PHP_FUNCTION(asynclog) {
 		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, "null", category);
 	}
 
-	SYSLOG();
-
 	smart_str_free(&buf);
 
 	RETURN_STR(ret);
@@ -173,12 +171,25 @@ PHP_RINIT_FUNCTION(asynclog) {
 PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	ASYNCLOG_G(restime) = microtime();
 
-	if (Z_TYPE(PG(http_globals)[TRACK_VARS_SERVER]) != IS_UNDEF) {
-		smart_str buf = {0};
+	smart_str buf = {0};
+
+	{
+		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_FILES};
+		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_FILES"};
+		zend_long i;
+
+		for(i=0; i<sizeof(keys)/sizeof(const int); i++) {
+			if(Z_TYPE(PG(http_globals)[keys[i]]) == IS_ARRAY && php_json_encode(&buf, &PG(http_globals)[keys[i]], PHP_JSON_PRETTY_PRINT) == SUCCESS && buf.s) {
+				smart_str_0(&buf);
+				SYSLOG("%s: %s", vars[i], ZSTR_VAL(buf.s));
+				smart_str_free(&buf);
+			}
+		}
+	}
+
+	if (Z_TYPE(PG(http_globals)[TRACK_VARS_SERVER]) == IS_ARRAY) {
 		HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
 		const char *ctlname;
-
-		// php_var_dump(_SERVER, 0);
 
 		if(!SG(request_info).request_uri) {
 			zval *prog, *argv, *argc, *arg0;
@@ -188,23 +199,27 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 			argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
 			argc = zend_hash_str_find(_SERVER, "argc", sizeof("argc")-1);
 
-			arg0 = zend_hash_index_find(Z_ARRVAL_P(argv), 0);
-
-			if(strcmp(Z_STRVAL_P(prog), Z_STRVAL_P(arg0))) {
+			if(Z_LVAL_P(argc) == 0) {
 				smart_str_append_ex(&buf, Z_STR_P(prog), 0);
-				smart_str_appendc_ex(&buf, ' ', 0);
-			}
+			} else {
+				arg0 = zend_hash_index_find(Z_ARRVAL_P(argv), 0);
 
-			smart_str_appendc_ex(&buf, '\'', 0);
-			smart_str_append_ex(&buf, Z_STR_P(arg0), 0);
-			smart_str_appendc_ex(&buf, '\'', 0);
+				if(strcmp(Z_STRVAL_P(prog), Z_STRVAL_P(arg0))) {
+					smart_str_append_ex(&buf, Z_STR_P(prog), 0);
+					smart_str_appendc_ex(&buf, ' ', 0);
+				}
 
-			for(i=1; i<Z_LVAL_P(argc); i++) {
-				zval *tmp = zend_hash_index_find(Z_ARRVAL_P(argv), i);
-				smart_str_appendc_ex(&buf, ' ', 0);
 				smart_str_appendc_ex(&buf, '\'', 0);
-				smart_str_append_ex(&buf, Z_STR_P(tmp), 0);
+				smart_str_append_ex(&buf, Z_STR_P(arg0), 0);
 				smart_str_appendc_ex(&buf, '\'', 0);
+
+				for(i=1; i<Z_LVAL_P(argc); i++) {
+					zval *tmp = zend_hash_index_find(Z_ARRVAL_P(argv), i);
+					smart_str_appendc_ex(&buf, ' ', 0);
+					smart_str_appendc_ex(&buf, '\'', 0);
+					smart_str_append_ex(&buf, Z_STR_P(tmp), 0);
+					smart_str_appendc_ex(&buf, '\'', 0);
+				}
 			}
 
 			ctlname = "COMMAND";
@@ -235,9 +250,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		}
 
 		smart_str_0(&buf);
-
 		SYSLOG("%s: %s", ctlname, ZSTR_VAL(buf.s));
-
 		smart_str_free(&buf);
 
 		if(SG(request_info).path_translated) {
@@ -245,17 +258,19 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		}
 		if(SG(request_info).request_uri) {
 			SYSLOG("REQUEST_URI: %s", SG(request_info).request_uri);
+		}
+		if(SG(request_info).content_length){
 			SYSLOG("CONTENT_TYPE: %s", SG(request_info).content_type);
 			SYSLOG("CONTENT_LENGTH: %ld", SG(request_info).content_length);
+		}
 
-			if(SG(request_info).request_body) {
-				zend_string *post_data_str = NULL;
+		if(SG(request_info).request_body) {
+			zend_string *post_data_str = NULL;
 
-				php_stream_rewind(SG(request_info).request_body);
-				post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
-				if(post_data_str) {
-					SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
-				}
+			php_stream_rewind(SG(request_info).request_body);
+			post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
+			if(post_data_str) {
+				SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
 			}
 		}
 	} else {

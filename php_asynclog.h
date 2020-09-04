@@ -26,13 +26,13 @@ extern zend_module_entry asynclog_module_entry;
 #ifdef ASYNCLOG_DEBUG
 #	include <syslog.h>
 #	include "SAPI.h"
-#	define OPENLOG()	openlog("asynclog", LOG_PID, LOG_USER)
+#	define OPENLOG()            openlog("asynclog", LOG_PID, LOG_USER)
 #	define SYSLOG(fmt, args...) syslog(LOG_USER, "%s -> " fmt, sapi_module.name, ##args)
-#	define CLOSELOG()	closelog()
+#	define CLOSELOG()           closelog()
 #else
-#	define OPENLOG() ((void)0)
+#	define OPENLOG()            ((void)0)
 #	define SYSLOG(fmt, args...) ((void)0)
-#	define CLOSELOG() ((void)0)
+#	define CLOSELOG()           ((void)0)
 #endif
 
 ZEND_BEGIN_MODULE_GLOBALS(asynclog)
