@@ -1,21 +1,6 @@
 <?php
-$br = (php_sapi_name() == "cli")? "":"<br>";
+extension_loaded('asynclog') or die('The asynclog extension is not loaded');
 
-if(!extension_loaded('asynclog')) {
-	dl('asynclog.' . PHP_SHLIB_SUFFIX);
-}
-$module = 'asynclog';
-$functions = get_extension_funcs($module);
-echo "Functions available in the test extension:$br\n";
-foreach($functions as $func) {
-    echo $func."$br\n";
-}
-echo "$br\n";
-$function = 'confirm_' . $module . '_compiled';
-if (extension_loaded($module)) {
-	$str = $function($module);
-} else {
-	$str = "Module $module is not compiled into PHP";
-}
-echo "$str\n";
-?>
+echo 'config: ', json_encode(ini_get_all('asynclog'), JSON_PRETTY_PRINT), PHP_EOL;
+echo 'constants: ', json_encode(get_defined_constants(true)['asynclog'], JSON_PRETTY_PRINT), PHP_EOL;
+echo asynclog('app', ASYNCLOG_LEVEL_INFO, 'test', $_SERVER), PHP_EOL;
