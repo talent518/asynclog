@@ -94,13 +94,13 @@ PHP_FUNCTION(asynclog) {
 	if (buf.s) {
 		smart_str_0(&buf);
 
-		SYSLOG("name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, buf.s->val, category);
+		SYSLOG("name: %s, category: %s, level: %ld, message: %s, data: %s", name, category, level, message, buf.s->val);
 
-		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, buf.s->val, category);
+		ret = strpprintf(0, "name: %s, category: %s, level: %ld, message: %s, data: %s", name, category, level, message, buf.s->val);
 	} else {
-		SYSLOG("name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, "null", category);
+		SYSLOG("name: %s, category: %s, level: %ld, message: %s", name, category, level, message);
 
-		ret = strpprintf(0, "name: %s, level: %ld, message: %s, data: %s, category: %s", name, level, message, "null", category);
+		ret = strpprintf(0, "name: %s, category: %s, level: %ld, message: %s", name, category, level, message);
 	}
 
 	smart_str_free(&buf);
