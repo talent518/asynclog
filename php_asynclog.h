@@ -5,11 +5,17 @@ extern zend_module_entry asynclog_module_entry;
 #define phpext_asynclog_ptr &asynclog_module_entry
 
 #define PHP_ASYNCLOG_VERSION        "0.1.0"
-#define PHP_ASYNCLOG_LEVEL_ERROR    1<<0
-#define PHP_ASYNCLOG_LEVEL_WARN     1<<1
-#define PHP_ASYNCLOG_LEVEL_INFO     1<<2
-#define PHP_ASYNCLOG_LEVEL_DEBUG    1<<3
-#define PHP_ASYNCLOG_LEVEL_VERBOSE  1<<4
+
+#define PHP_ASYNCLOG_MODE_FILE      (1<<0)
+#define PHP_ASYNCLOG_MODE_REDIS     (1<<1)
+#define PHP_ASYNCLOG_MODE_ELASTIC   (1<<2)
+
+#define PHP_ASYNCLOG_LEVEL_ERROR    (1<<0)
+#define PHP_ASYNCLOG_LEVEL_WARN     (1<<1)
+#define PHP_ASYNCLOG_LEVEL_INFO     (1<<2)
+#define PHP_ASYNCLOG_LEVEL_DEBUG    (1<<3)
+#define PHP_ASYNCLOG_LEVEL_VERBOSE  (1<<4)
+#define PHP_ASYNCLOG_LEVEL_ALL (PHP_ASYNCLOG_LEVEL_ERROR | PHP_ASYNCLOG_LEVEL_WARN | PHP_ASYNCLOG_LEVEL_INFO | PHP_ASYNCLOG_LEVEL_DEBUG | PHP_ASYNCLOG_LEVEL_VERBOSE)
 
 #ifdef PHP_WIN32
 #	define PHP_ASYNCLOG_API __declspec(dllexport)
@@ -26,8 +32,8 @@ extern zend_module_entry asynclog_module_entry;
 #ifdef ASYNCLOG_DEBUG
 #	include <syslog.h>
 #	include "SAPI.h"
-#	define OPENLOG()            openlog("asynclog", LOG_PID, LOG_USER)
-#	define SYSLOG(fmt, args...) syslog(LOG_USER, "%s -> " fmt, sapi_module.name, ##args)
+#	define OPENLOG()            openlog("asynclog", LOG_PID | LOG_CONS, LOG_USER)
+#	define SYSLOG(fmt, args...) syslog(LOG_DEBUG, "%s -> " fmt, sapi_module.name, ##args)
 #	define CLOSELOG()           closelog()
 #else
 #	define OPENLOG()            ((void)0)
@@ -40,6 +46,7 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 	double     restime;
 	zend_long  threads;
 	zend_long  type;
+	zend_long  level;
 	zend_long  redis_port;
 	char *filepath;
 	char *redis_host;

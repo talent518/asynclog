@@ -20,7 +20,8 @@ ZEND_DECLARE_MODULE_GLOBALS(asynclog);
 
 PHP_INI_BEGIN()
     STD_PHP_INI_ENTRY("asynclog.threads",                        "1", PHP_INI_ALL, OnUpdateLong,   threads,    zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.type",          "ASYNCLOG_LEVEL_ALL", PHP_INI_ALL, OnUpdateLong,   type,       zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.type",          "ASYNCLOG_MODE_FILE", PHP_INI_ALL, OnUpdateLong,   type,       zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.level",         "ASYNCLOG_LEVEL_ALL", PHP_INI_ALL, OnUpdateLong,   level,      zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.filepath",      "/var/log/asynclog/", PHP_INI_ALL, OnUpdateString, filepath,   zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.redis_host",             "127.0.0.1", PHP_INI_ALL, OnUpdateString, redis_host, zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.redis_port",                  "6379", PHP_INI_ALL, OnUpdateLong,   redis_port, zend_asynclog_globals, asynclog_globals)
@@ -57,6 +58,10 @@ PHP_FUNCTION(asynclog) {
 
 	if (zend_parse_parameters_throw(ZEND_NUM_ARGS(), "sls|as", &name, &name_len, &level, &message, &message_len, &data, &category, &category_len) == FAILURE) {
 		return;
+	}
+
+	if((ASYNCLOG_G(level) & level & PHP_ASYNCLOG_LEVEL_ALL) != level) {
+
 	}
 
 	if(data && php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT) == FAILURE) {
@@ -116,8 +121,9 @@ PHP_GINIT_FUNCTION(asynclog) {
 	asynclog_globals->reqtime    = 0;
 	asynclog_globals->restime    = 0;
 
-	asynclog_globals->threads    = 1;
-	asynclog_globals->type       = 1;
+	asynclog_globals->threads    = 0;
+	asynclog_globals->type       = 0;
+	asynclog_globals->level      = 0;
 	asynclog_globals->filepath   = NULL;
 	asynclog_globals->redis_host = NULL;
 	asynclog_globals->redis_port = 1;
@@ -138,12 +144,16 @@ PHP_MINIT_FUNCTION(asynclog) {
 
 	REGISTER_STRING_CONSTANT("ASYNCLOG_VERSION",     PHP_ASYNCLOG_VERSION,       CONST_CS | CONST_PERSISTENT);
 
+	REGISTER_LONG_CONSTANT("ASYNCLOG_MODE_FILE",     PHP_ASYNCLOG_MODE_FILE,     CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("ASYNCLOG_MODE_REDIS",    PHP_ASYNCLOG_MODE_REDIS,    CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("ASYNCLOG_MODE_ELASTIC",  PHP_ASYNCLOG_MODE_ELASTIC,  CONST_CS | CONST_PERSISTENT);
+
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_ERROR",   PHP_ASYNCLOG_LEVEL_ERROR,   CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_WARN",    PHP_ASYNCLOG_LEVEL_WARN,    CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_INFO",    PHP_ASYNCLOG_LEVEL_INFO,    CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_DEBUG",   PHP_ASYNCLOG_LEVEL_DEBUG,   CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_VERBOSE", PHP_ASYNCLOG_LEVEL_VERBOSE, CONST_CS | CONST_PERSISTENT);
-	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_ALL",     PHP_ASYNCLOG_LEVEL_VERBOSE, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_ALL",     PHP_ASYNCLOG_LEVEL_ALL,     CONST_CS | CONST_PERSISTENT);
 
 	return SUCCESS;
 }
@@ -171,23 +181,31 @@ PHP_RINIT_FUNCTION(asynclog) {
 PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	ASYNCLOG_G(restime) = microtime();
 
+	SYSLOG("RSHUTDOWN: %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
+
 	smart_str buf = {0};
 
 	{
 		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_FILES};
 		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_FILES"};
-		zend_long i;
+		zend_long i, n = 0;
+		zval *var;
 
 		for(i=0; i<sizeof(keys)/sizeof(const int); i++) {
-			if(Z_TYPE(PG(http_globals)[keys[i]]) == IS_ARRAY && php_json_encode(&buf, &PG(http_globals)[keys[i]], PHP_JSON_PRETTY_PRINT) == SUCCESS && buf.s) {
+			var = &PG(http_globals)[keys[i]];
+			if(Z_TYPE_P(var) == IS_ARRAY && zend_hash_num_elements(Z_ARRVAL_P(var)) && php_json_encode(&buf, var, PHP_JSON_PRETTY_PRINT) == SUCCESS && buf.s) {
 				smart_str_0(&buf);
 				SYSLOG("%s: %s", vars[i], ZSTR_VAL(buf.s));
 				smart_str_free(&buf);
+
+				n++;
 			}
 		}
+
+		if(n == 0) return SUCCESS;
 	}
 
-	if (Z_TYPE(PG(http_globals)[TRACK_VARS_SERVER]) == IS_ARRAY) {
+	{
 		HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
 		const char *ctlname;
 
@@ -273,11 +291,14 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 				SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
 			}
 		}
-	} else {
-		SYSLOG("REQUEST: -");
-	}
 
-	SYSLOG("RSHUTDOWN: %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
+#if ASYNCLOG_DEBUG
+		{
+			double t = microtime();
+			SYSLOG("RSHUTDOWN: %f - %.3fms\n", t, (t - ASYNCLOG_G(restime)) * 1000);
+		}
+#endif
+	}
 
 	return SUCCESS;
 }
