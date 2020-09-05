@@ -19,15 +19,15 @@
 ZEND_DECLARE_MODULE_GLOBALS(asynclog);
 
 PHP_INI_BEGIN()
-    STD_PHP_INI_ENTRY("asynclog.threads",                        "1", PHP_INI_ALL, OnUpdateLong,   threads,    zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.type",          "ASYNCLOG_MODE_FILE", PHP_INI_ALL, OnUpdateLong,   type,       zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.level",         "ASYNCLOG_LEVEL_ALL", PHP_INI_ALL, OnUpdateLong,   level,      zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.filepath",      "/var/log/asynclog/", PHP_INI_ALL, OnUpdateString, filepath,   zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.redis_host",             "127.0.0.1", PHP_INI_ALL, OnUpdateString, redis_host, zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.redis_port",                  "6379", PHP_INI_ALL, OnUpdateLong,   redis_port, zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.redis_auth",                      "", PHP_INI_ALL, OnUpdateString, redis_auth, zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_ALL, OnUpdateString, redis_auth, zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.category",             "application", PHP_INI_ALL, OnUpdateString, category,   zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.threads",                        "1", PHP_INI_SYSTEM, OnUpdateLong,   threads,    zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.type",                           "1", PHP_INI_SYSTEM, OnUpdateLong,   type,       zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.level",                         "31", PHP_INI_SYSTEM, OnUpdateLong,   level,      zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.filepath",      "/var/log/asynclog/", PHP_INI_SYSTEM, OnUpdateString, filepath,   zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.redis_host",             "127.0.0.1", PHP_INI_SYSTEM, OnUpdateString, redis_host, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.redis_port",                  "6379", PHP_INI_SYSTEM, OnUpdateLong,   redis_port, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.redis_auth",                      "", PHP_INI_SYSTEM, OnUpdateString, redis_auth, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_SYSTEM, OnUpdateString, elastic,    zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.category",             "application", PHP_INI_SYSTEM, OnUpdateString, category,   zend_asynclog_globals, asynclog_globals)
 PHP_INI_END()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 3)
@@ -39,29 +39,54 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 3)
 ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(asynclog) {
-	char *name = NULL;
+	const char *name = NULL;
 	size_t name_len;
 
 	zend_long level = 0;
+	const char *levelstr = NULL;
 
-	char *message = NULL;
+	const char *message = NULL;
 	size_t message_len;
 
 	zval *data = NULL;
 
-	char *category = NULL;
+	const char *category = NULL;
 	size_t category_len;
 
 	smart_str buf = {0};
 
 	zend_string *ret;
 
+	double itertime = microtime(), t;
+
 	if (zend_parse_parameters_throw(ZEND_NUM_ARGS(), "sls|as", &name, &name_len, &level, &message, &message_len, &data, &category, &category_len) == FAILURE) {
 		return;
 	}
 
-	if((ASYNCLOG_G(level) & level & PHP_ASYNCLOG_LEVEL_ALL) != level) {
+	INILOG(FUNC);
 
+	if((ASYNCLOG_G(level) & level) != level) {
+		RETURN_FALSE;
+	}
+
+	switch(level) {
+		case PHP_ASYNCLOG_LEVEL_ERROR:
+			levelstr = "error";
+			break;
+		case PHP_ASYNCLOG_LEVEL_WARN:
+			levelstr = "warn";
+			break;
+		case PHP_ASYNCLOG_LEVEL_INFO:
+			levelstr = "info";
+			break;
+		case PHP_ASYNCLOG_LEVEL_DEBUG:
+			levelstr = "debug";
+			break;
+		case PHP_ASYNCLOG_LEVEL_VERBOSE:
+			levelstr = "verbose";
+			break;
+		default:
+			RETURN_FALSE;
 	}
 
 	if(data && php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT) == FAILURE) {
@@ -93,19 +118,20 @@ PHP_FUNCTION(asynclog) {
 		}
 	}
 	if(!category) {
-		category = "application";
+		category = ASYNCLOG_G(category);
 	}
+
+	t = (itertime - ASYNCLOG_G(itertime)) * 1000;
+
+	ASYNCLOG_G(itertime) = itertime;
 
 	if (buf.s) {
 		smart_str_0(&buf);
-
-		SYSLOG("name: %s, category: %s, level: %ld, message: %s, data: %s", name, category, level, message, buf.s->val);
-
-		ret = strpprintf(0, "name: %s, category: %s, level: %ld, message: %s, data: %s", name, category, level, message, buf.s->val);
+		SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
+		ret = strpprintf(0, "[%s][%s][%s] %s %s", name, category, levelstr, message, ZSTR_VAL(buf.s));
 	} else {
-		SYSLOG("name: %s, category: %s, level: %ld, message: %s", name, category, level, message);
-
-		ret = strpprintf(0, "name: %s, category: %s, level: %ld, message: %s", name, category, level, message);
+		SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
+		ret = strpprintf(0, "[%s][%s][%s] %s", name, category, levelstr, message);
 	}
 
 	smart_str_free(&buf);
@@ -139,6 +165,7 @@ PHP_GSHUTDOWN_FUNCTION(asynclog) {
 
 PHP_MINIT_FUNCTION(asynclog) {
 	SYSLOG("MINIT");
+	INILOG(MINIT);
 
 	REGISTER_INI_ENTRIES();
 
@@ -160,6 +187,7 @@ PHP_MINIT_FUNCTION(asynclog) {
 
 PHP_MSHUTDOWN_FUNCTION(asynclog) {
 	SYSLOG("MSHUTDOWN");
+	INILOG(MSHUTDOWN);
 
 	UNREGISTER_INI_ENTRIES();
 
@@ -171,9 +199,10 @@ PHP_RINIT_FUNCTION(asynclog) {
 	ZEND_TSRMLS_CACHE_UPDATE();
 #endif
 
-	ASYNCLOG_G(reqtime) = microtime();
+	ASYNCLOG_G(reqtime) = ASYNCLOG_G(itertime) = microtime();
 
 	SYSLOG("RINIT: %f\n", ASYNCLOG_G(reqtime));
+	INILOG(RINIT);
 
 	return SUCCESS;
 }
@@ -181,7 +210,8 @@ PHP_RINIT_FUNCTION(asynclog) {
 PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	ASYNCLOG_G(restime) = microtime();
 
-	SYSLOG("RSHUTDOWN: %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
+	SYSLOG("RSHUTDOWN BEGIN: %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
+	INILOG(RSHUTDOWN);
 
 	smart_str buf = {0};
 
@@ -295,7 +325,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 #if ASYNCLOG_DEBUG
 		{
 			double t = microtime();
-			SYSLOG("RSHUTDOWN: %f - %.3fms\n", t, (t - ASYNCLOG_G(restime)) * 1000);
+			SYSLOG("RSHUTDOWN END: %f - %.3fms\n", t, (t - ASYNCLOG_G(restime)) * 1000);
 		}
 #endif
 	}
@@ -305,6 +335,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 PHP_MINFO_FUNCTION(asynclog) {
 	SYSLOG("MINFO");
+	INILOG(MINFO);
 
 	php_info_print_table_start();
 	php_info_print_table_header(2, "asynclog support", "enabled");

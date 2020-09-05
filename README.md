@@ -14,6 +14,7 @@ sudo service rsyslog restart
 # 监控调试日志
 tailf /var/log/asynclog.log | sed 's|#012|\n|g'
 ```
+
 ### php.ini配置
 ```ini
 ; 异步日志处理线程数

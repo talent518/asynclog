@@ -7,4 +7,4 @@ asynclog('file', ASYNCLOG_LEVEL_INFO, 'tests/003.phpt')
 echo asynclog('file', ASYNCLOG_LEVEL_INFO, 'tests/003.phpt'), PHP_EOL;
 ?>
 --EXPECT--
-name: file, category: application, level: 4, message: tests/003.phpt
+[file][application][info] tests/003.phpt
