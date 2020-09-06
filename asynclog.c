@@ -89,7 +89,7 @@ PHP_FUNCTION(asynclog) {
 			RETURN_FALSE;
 	}
 
-	if(data && php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT) == FAILURE) {
+	if(data && php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
 		switch(JSON_G(error_code)) {
 			case PHP_JSON_ERROR_NONE:
 				RETURN_STRING("No error");
@@ -214,26 +214,43 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	INILOG(RSHUTDOWN);
 
 	smart_str buf = {0};
+	zval globals;
+	zend_long i;
 
 	{
 		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_FILES};
 		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_FILES"};
-		zend_long i, n = 0;
 		zval *var;
 
+		array_init_size(&globals, 5);
 		for(i=0; i<sizeof(keys)/sizeof(const int); i++) {
 			var = &PG(http_globals)[keys[i]];
-			if(Z_TYPE_P(var) == IS_ARRAY && zend_hash_num_elements(Z_ARRVAL_P(var)) && php_json_encode(&buf, var, PHP_JSON_PRETTY_PRINT) == SUCCESS && buf.s) {
-				smart_str_0(&buf);
-				SYSLOG("%s: %s", vars[i], ZSTR_VAL(buf.s));
-				smart_str_free(&buf);
-
-				n++;
+			if(Z_TYPE_P(var) == IS_ARRAY && zend_hash_num_elements(Z_ARRVAL_P(var))) {
+				add_assoc_zval(&globals, vars[i], var);
 			}
 		}
 
-		if(n == 0) return SUCCESS;
+		if(zend_hash_num_elements(Z_ARRVAL(globals)) == 0) {
+			goto end;
+		}
 	}
+
+#ifdef ASYNCLOG_DEBUG
+	double t;
+	if(php_json_encode(&buf, &globals, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == SUCCESS && buf.s) {
+		t = microtime();
+
+		smart_str_0(&buf);
+		SYSLOG("GLOBALS: %f - %.3fms - %s", t, (t - ASYNCLOG_G(restime)) * 1000, ZSTR_VAL(buf.s));
+		smart_str_free(&buf);
+	} else if(buf.s) {
+		smart_str_free(&buf);
+
+		t = microtime();
+	} else {
+		t = microtime();
+	}
+#endif
 
 	{
 		HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
@@ -241,7 +258,6 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 		if(!SG(request_info).request_uri) {
 			zval *prog, *argv, *argc, *arg0;
-			zend_long i;
 
 			prog = zend_hash_str_find(_SERVER, "_", sizeof("_")-1);
 			argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
@@ -319,16 +335,21 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 			post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
 			if(post_data_str) {
 				SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
+
+				zend_string_free(post_data_str);
 			}
 		}
+	}
+
+end:
+	zval_ptr_dtor(&globals);
 
 #if ASYNCLOG_DEBUG
-		{
-			double t = microtime();
-			SYSLOG("RSHUTDOWN END: %f - %.3fms\n", t, (t - ASYNCLOG_G(restime)) * 1000);
-		}
-#endif
+	{
+		double t2 = microtime();
+		SYSLOG("RSHUTDOWN END: %f - %.3fms - %.3fms\n", t2, (t2 - t) * 1000, (t2 - ASYNCLOG_G(restime)) * 1000);
 	}
+#endif
 
 	return SUCCESS;
 }

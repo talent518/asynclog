@@ -35,7 +35,7 @@ extern zend_module_entry asynclog_module_entry;
 #	define OPENLOG()            openlog("asynclog", LOG_PID | LOG_CONS, LOG_USER)
 #	define SYSLOG(fmt, args...) syslog(LOG_DEBUG, "%s -> " fmt, sapi_module.name, ##args)
 #	define CLOSELOG()           closelog()
-#	define INILOG(fmt)          SYSLOG(#fmt " GLOBALS: threads: %ld, type: %ld, level: %ld, filepath: %s, redis_host: %s, redis_port: %ld, redis_auth: %s, elastic: %s, category: %s", ASYNCLOG_G(threads), ASYNCLOG_G(type), ASYNCLOG_G(level), ASYNCLOG_G(filepath), ASYNCLOG_G(redis_host), ASYNCLOG_G(redis_port), ASYNCLOG_G(redis_auth), ASYNCLOG_G(elastic), ASYNCLOG_G(category))
+#	define INILOG(fmt)          SYSLOG(#fmt " CONFIG: threads: %ld, type: %ld, level: %ld, filepath: %s, redis_host: %s, redis_port: %ld, redis_auth: %s, elastic: %s, category: %s", ASYNCLOG_G(threads), ASYNCLOG_G(type), ASYNCLOG_G(level), ASYNCLOG_G(filepath), ASYNCLOG_G(redis_host), ASYNCLOG_G(redis_port), ASYNCLOG_G(redis_auth), ASYNCLOG_G(elastic), ASYNCLOG_G(category))
 #else
 #	define OPENLOG()            ((void)0)
 #	define SYSLOG(fmt, args...) ((void)0)
