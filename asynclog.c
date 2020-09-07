@@ -28,6 +28,7 @@ PHP_INI_BEGIN()
     STD_PHP_INI_ENTRY("asynclog.redis_auth",                      "", PHP_INI_SYSTEM, OnUpdateString, redis_auth, zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_SYSTEM, OnUpdateString, elastic,    zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.category",             "application", PHP_INI_SYSTEM, OnUpdateString, category,   zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.max_output",                     "0", PHP_INI_SYSTEM, OnUpdateString, max_output, zend_asynclog_globals, asynclog_globals)
 PHP_INI_END()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 3)
@@ -37,6 +38,26 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 3)
 	ZEND_ARG_INFO(0, data)
 	ZEND_ARG_TYPE_INFO(0, category, IS_STRING, 0)
 ZEND_END_ARG_INFO()
+
+static void php_head_apply_header_list_to_hash(void *data, void *arg) {
+	sapi_header_struct *sapi_header = (sapi_header_struct *)data;
+	smart_str *buf = (smart_str *) arg;
+
+	if (buf && sapi_header) {
+		smart_str_appendl(buf, PHP_EOL, sizeof(PHP_EOL)-1);
+		smart_str_appendl(buf, sapi_header->header, sapi_header->header_len);
+	}
+}
+
+static void php_asynclog_output_handler(char *output, size_t output_len, char **handled_output, size_t *handled_output_len, int mode) {
+	*handled_output = output;
+	*handled_output_len = output_len;
+
+	ASYNCLOG_G(output_len) += output_len;
+	if(ASYNCLOG_G(max_output) <= 0 || smart_str_get_len(&ASYNCLOG_G(output)) + output_len < ASYNCLOG_G(max_output)) {
+		smart_str_appendl(&ASYNCLOG_G(output), output, output_len);
+	}
+}
 
 PHP_FUNCTION(asynclog) {
 	const char *name = NULL;
@@ -155,6 +176,11 @@ PHP_GINIT_FUNCTION(asynclog) {
 	asynclog_globals->redis_port = 1;
 	asynclog_globals->redis_auth = NULL;
 	asynclog_globals->elastic    = NULL;
+
+	asynclog_globals->output_len = 0;
+	asynclog_globals->max_output = 0;
+
+	memset(&asynclog_globals->output, sizeof(smart_str), 0);
 }
 
 PHP_GSHUTDOWN_FUNCTION(asynclog) {
@@ -202,7 +228,13 @@ PHP_RINIT_FUNCTION(asynclog) {
 	ASYNCLOG_G(reqtime) = ASYNCLOG_G(itertime) = microtime();
 
 	SYSLOG("RINIT: %f\n", ASYNCLOG_G(reqtime));
+
 	INILOG(RINIT);
+
+	if(!sapi_module.phpinfo_as_text) {
+		ASYNCLOG_G(output_len) = 0;
+		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, PHP_OUTPUT_HANDLER_ALIGNTO_SIZE, PHP_OUTPUT_HANDLER_STDFLAGS);
+	}
 
 	return SUCCESS;
 }
@@ -211,7 +243,13 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	ASYNCLOG_G(restime) = microtime();
 
 	SYSLOG("RSHUTDOWN BEGIN: %f - %.3fms\n", ASYNCLOG_G(restime), (ASYNCLOG_G(restime) - ASYNCLOG_G(reqtime)) * 1000);
+
 	INILOG(RSHUTDOWN);
+
+	if(ASYNCLOG_G(output_len)) {
+		SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
+		SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
+	}
 
 	smart_str buf = {0};
 	zval globals;
@@ -259,6 +297,8 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		if(!SG(request_info).request_uri) {
 			zval *prog, *argv, *argc, *arg0;
 
+			SYSLOG("STATUS: %d", EG(exit_status));
+
 			prog = zend_hash_str_find(_SERVER, "_", sizeof("_")-1);
 			argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
 			argc = zend_hash_str_find(_SERVER, "argc", sizeof("argc")-1);
@@ -289,6 +329,15 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 			ctlname = "COMMAND";
 		} else {
 			zval *method, *scheme, *host, *url, *user_agent;
+
+			SYSLOG("STATUS: %d", SG(sapi_headers).http_response_code);
+
+			zend_llist_apply_with_argument(&SG(sapi_headers).headers, php_head_apply_header_list_to_hash, &buf);
+			if(buf.s) {
+				smart_str_0(&buf);
+				SYSLOG("HEADERS: %s", ZSTR_VAL(buf.s) + strlen(PHP_EOL));
+				smart_str_free(&buf);
+			}
 
 			method = zend_hash_str_find(_SERVER, "REQUEST_METHOD", sizeof("REQUEST_METHOD")-1);
 			scheme = zend_hash_str_find(_SERVER, "REQUEST_SCHEME", sizeof("REQUEST_SCHEME")-1);
@@ -343,6 +392,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 end:
 	zval_ptr_dtor(&globals);
+	smart_str_free(&ASYNCLOG_G(output));
 
 #if ASYNCLOG_DEBUG
 	{
