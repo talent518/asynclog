@@ -247,6 +247,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	INILOG(RSHUTDOWN);
 
 	if(ASYNCLOG_G(output_len)) {
+		smart_str_0(&ASYNCLOG_G(output));
 		SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
 		SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
 	}
