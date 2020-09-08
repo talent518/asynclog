@@ -15,6 +15,7 @@
 
 #include "api.h"
 #include "php_asynclog.h"
+#include "log.h"
 
 ZEND_DECLARE_MODULE_GLOBALS(asynclog);
 
@@ -110,34 +111,6 @@ PHP_FUNCTION(asynclog) {
 			RETURN_FALSE;
 	}
 
-	if(data && php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
-		switch(JSON_G(error_code)) {
-			case PHP_JSON_ERROR_NONE:
-				RETURN_STRING("No error");
-			case PHP_JSON_ERROR_DEPTH:
-				RETURN_STRING("Maximum stack depth exceeded");
-			case PHP_JSON_ERROR_STATE_MISMATCH:
-				RETURN_STRING("State mismatch (invalid or malformed JSON)");
-			case PHP_JSON_ERROR_CTRL_CHAR:
-				RETURN_STRING("Control character error, possibly incorrectly encoded");
-			case PHP_JSON_ERROR_SYNTAX:
-				RETURN_STRING("Syntax error");
-			case PHP_JSON_ERROR_UTF8:
-				RETURN_STRING("Malformed UTF-8 characters, possibly incorrectly encoded");
-			case PHP_JSON_ERROR_RECURSION:
-				RETURN_STRING("Recursion detected");
-			case PHP_JSON_ERROR_INF_OR_NAN:
-				RETURN_STRING("Inf and NaN cannot be JSON encoded");
-			case PHP_JSON_ERROR_UNSUPPORTED_TYPE:
-				RETURN_STRING("Type is not supported");
-			case PHP_JSON_ERROR_INVALID_PROPERTY_NAME:
-				RETURN_STRING("The decoded property name is invalid");
-			case PHP_JSON_ERROR_UTF16:
-				RETURN_STRING("Single unpaired UTF-16 surrogate in unicode escape");
-			default:
-				RETURN_STRING("Unknown error");
-		}
-	}
 	if(!category) {
 		category = ASYNCLOG_G(category);
 	}
@@ -146,18 +119,55 @@ PHP_FUNCTION(asynclog) {
 
 	ASYNCLOG_G(itertime) = itertime;
 
-	if (buf.s) {
-		smart_str_0(&buf);
-		SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
-		ret = strpprintf(0, "[%s][%s][%s] %s %s", name, category, levelstr, message, ZSTR_VAL(buf.s));
+	if(data) {
+		if(Z_TYPE_P(data) == IS_STRING) {
+			log_push(name, levelstr, message, Z_STR_P(data), category, t);
+		} else if(php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
+			smart_str_free(&buf);
+
+			switch(JSON_G(error_code)) {
+				case PHP_JSON_ERROR_NONE:
+					RETURN_STRING("No error");
+				case PHP_JSON_ERROR_DEPTH:
+					RETURN_STRING("Maximum stack depth exceeded");
+				case PHP_JSON_ERROR_STATE_MISMATCH:
+					RETURN_STRING("State mismatch (invalid or malformed JSON)");
+				case PHP_JSON_ERROR_CTRL_CHAR:
+					RETURN_STRING("Control character error, possibly incorrectly encoded");
+				case PHP_JSON_ERROR_SYNTAX:
+					RETURN_STRING("Syntax error");
+				case PHP_JSON_ERROR_UTF8:
+					RETURN_STRING("Malformed UTF-8 characters, possibly incorrectly encoded");
+				case PHP_JSON_ERROR_RECURSION:
+					RETURN_STRING("Recursion detected");
+				case PHP_JSON_ERROR_INF_OR_NAN:
+					RETURN_STRING("Inf and NaN cannot be JSON encoded");
+				case PHP_JSON_ERROR_UNSUPPORTED_TYPE:
+					RETURN_STRING("Type is not supported");
+				case PHP_JSON_ERROR_INVALID_PROPERTY_NAME:
+					RETURN_STRING("The decoded property name is invalid");
+				case PHP_JSON_ERROR_UTF16:
+					RETURN_STRING("Single unpaired UTF-16 surrogate in unicode escape");
+				default:
+					RETURN_STRING("Unknown error");
+			}
+		} else if (buf.s) {
+			smart_str_0(&buf);
+
+			SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
+			log_push(name, levelstr, message, buf.s, category, t);
+
+			smart_str_free(&buf);
+		} else {
+			SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
+			log_push(name, levelstr, message, NULL, category, t);
+		}
 	} else {
 		SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
-		ret = strpprintf(0, "[%s][%s][%s] %s", name, category, levelstr, message);
+		log_push(name, levelstr, message, NULL, category, t);
 	}
 
-	smart_str_free(&buf);
-
-	RETURN_STR(ret);
+	RETURN_TRUE;
 }
 
 PHP_GINIT_FUNCTION(asynclog) {
@@ -208,6 +218,8 @@ PHP_MINIT_FUNCTION(asynclog) {
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_VERBOSE", PHP_ASYNCLOG_LEVEL_VERBOSE, CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_ALL",     PHP_ASYNCLOG_LEVEL_ALL,     CONST_CS | CONST_PERSISTENT);
 
+	log_init();
+
 	return SUCCESS;
 }
 
@@ -216,6 +228,8 @@ PHP_MSHUTDOWN_FUNCTION(asynclog) {
 	INILOG(MSHUTDOWN);
 
 	UNREGISTER_INI_ENTRIES();
+
+	log_destroy();
 
 	return SUCCESS;
 }
@@ -236,6 +250,8 @@ PHP_RINIT_FUNCTION(asynclog) {
 		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, PHP_OUTPUT_HANDLER_ALIGNTO_SIZE, PHP_OUTPUT_HANDLER_STDFLAGS);
 	}
 
+	log_begin_request();
+
 	return SUCCESS;
 }
 
@@ -246,20 +262,17 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 	INILOG(RSHUTDOWN);
 
-	if(ASYNCLOG_G(output_len)) {
-		smart_str_0(&ASYNCLOG_G(output));
-		SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
-		SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
-	}
+	smart_str_0(&ASYNCLOG_G(output));
 
-	smart_str buf = {0};
-	zval globals;
+	smart_str gbuf = {0}, hbuf = {0}, rbuf = {0};
 	zend_long i;
+	double t = ASYNCLOG_G(restime);
 
 	{
 		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_FILES};
 		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_FILES"};
 		zval *var;
+		zval globals;
 
 		array_init_size(&globals, 5);
 		for(i=0; i<sizeof(keys)/sizeof(const int); i++) {
@@ -270,60 +283,96 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		}
 
 		if(zend_hash_num_elements(Z_ARRVAL(globals)) == 0) {
+			zval_ptr_dtor(&globals);
+
+			goto end;
+		} else if(php_json_encode(&gbuf, &globals, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
+			zval_ptr_dtor(&globals);
+
+			switch(JSON_G(error_code)) {
+				case PHP_JSON_ERROR_NONE:
+					SYSLOG("GLOBALS: No error");
+					break;
+				case PHP_JSON_ERROR_DEPTH:
+					SYSLOG("GLOBALS: Maximum stack depth exceeded");
+					break;
+				case PHP_JSON_ERROR_STATE_MISMATCH:
+					SYSLOG("GLOBALS: State mismatch (invalid or malformed JSON)");
+					break;
+				case PHP_JSON_ERROR_CTRL_CHAR:
+					SYSLOG("GLOBALS: Control character error, possibly incorrectly encoded");
+					break;
+				case PHP_JSON_ERROR_SYNTAX:
+					SYSLOG("GLOBALS: Syntax error");
+					break;
+				case PHP_JSON_ERROR_UTF8:
+					SYSLOG("GLOBALS: Malformed UTF-8 characters, possibly incorrectly encoded");
+					break;
+				case PHP_JSON_ERROR_RECURSION:
+					SYSLOG("GLOBALS: Recursion detected");
+					break;
+				case PHP_JSON_ERROR_INF_OR_NAN:
+					SYSLOG("GLOBALS: Inf and NaN cannot be JSON encoded");
+					break;
+				case PHP_JSON_ERROR_UNSUPPORTED_TYPE:
+					SYSLOG("GLOBALS: Type is not supported");
+					break;
+				case PHP_JSON_ERROR_INVALID_PROPERTY_NAME:
+					SYSLOG("GLOBALS: The decoded property name is invalid");
+					break;
+				case PHP_JSON_ERROR_UTF16:
+					SYSLOG("GLOBALS: Single unpaired UTF-16 surrogate in unicode escape");
+					break;
+				default:
+					SYSLOG("GLOBALS: Unknown error");
+					break;
+			}
+
+			goto end;
+		} else if(gbuf.s) {
+			zval_ptr_dtor(&globals);
+			smart_str_0(&gbuf);
+		} else {
+			SYSLOG("GLOBALS: Is empty");
 			goto end;
 		}
 	}
 
-#ifdef ASYNCLOG_DEBUG
-	double t;
-	if(php_json_encode(&buf, &globals, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == SUCCESS && buf.s) {
-		t = microtime();
-
-		smart_str_0(&buf);
-		SYSLOG("GLOBALS: %f - %.3fms - %s", t, (t - ASYNCLOG_G(restime)) * 1000, ZSTR_VAL(buf.s));
-		smart_str_free(&buf);
-	} else if(buf.s) {
-		smart_str_free(&buf);
-
-		t = microtime();
-	} else {
-		t = microtime();
-	}
-#endif
-
 	{
 		HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
 		const char *ctlname;
+		int status = 0;
+		zend_string *post_data_str = NULL;
 
 		if(!SG(request_info).request_uri) {
 			zval *prog, *argv, *argc, *arg0;
 
-			SYSLOG("STATUS: %d", EG(exit_status));
+			status = EG(exit_status);
 
 			prog = zend_hash_str_find(_SERVER, "_", sizeof("_")-1);
 			argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
 			argc = zend_hash_str_find(_SERVER, "argc", sizeof("argc")-1);
 
 			if(Z_LVAL_P(argc) == 0) {
-				smart_str_append_ex(&buf, Z_STR_P(prog), 0);
+				smart_str_append_ex(&rbuf, Z_STR_P(prog), 0);
 			} else {
 				arg0 = zend_hash_index_find(Z_ARRVAL_P(argv), 0);
 
 				if(strcmp(Z_STRVAL_P(prog), Z_STRVAL_P(arg0))) {
-					smart_str_append_ex(&buf, Z_STR_P(prog), 0);
-					smart_str_appendc_ex(&buf, ' ', 0);
+					smart_str_append_ex(&rbuf, Z_STR_P(prog), 0);
+					smart_str_appendc_ex(&rbuf, ' ', 0);
 				}
 
-				smart_str_appendc_ex(&buf, '\'', 0);
-				smart_str_append_ex(&buf, Z_STR_P(arg0), 0);
-				smart_str_appendc_ex(&buf, '\'', 0);
+				smart_str_appendc_ex(&rbuf, '\'', 0);
+				smart_str_append_ex(&rbuf, Z_STR_P(arg0), 0);
+				smart_str_appendc_ex(&rbuf, '\'', 0);
 
 				for(i=1; i<Z_LVAL_P(argc); i++) {
 					zval *tmp = zend_hash_index_find(Z_ARRVAL_P(argv), i);
-					smart_str_appendc_ex(&buf, ' ', 0);
-					smart_str_appendc_ex(&buf, '\'', 0);
-					smart_str_append_ex(&buf, Z_STR_P(tmp), 0);
-					smart_str_appendc_ex(&buf, '\'', 0);
+					smart_str_appendc_ex(&rbuf, ' ', 0);
+					smart_str_appendc_ex(&rbuf, '\'', 0);
+					smart_str_append_ex(&rbuf, Z_STR_P(tmp), 0);
+					smart_str_appendc_ex(&rbuf, '\'', 0);
 				}
 			}
 
@@ -331,14 +380,9 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		} else {
 			zval *method, *scheme, *host, *url, *user_agent;
 
-			SYSLOG("STATUS: %d", SG(sapi_headers).http_response_code);
+			status = SG(sapi_headers).http_response_code;
 
-			zend_llist_apply_with_argument(&SG(sapi_headers).headers, php_head_apply_header_list_to_hash, &buf);
-			if(buf.s) {
-				smart_str_0(&buf);
-				SYSLOG("HEADERS: %s", ZSTR_VAL(buf.s) + strlen(PHP_EOL));
-				smart_str_free(&buf);
-			}
+			zend_llist_apply_with_argument(&SG(sapi_headers).headers, php_head_apply_header_list_to_hash, &hbuf);
 
 			method = zend_hash_str_find(_SERVER, "REQUEST_METHOD", sizeof("REQUEST_METHOD")-1);
 			scheme = zend_hash_str_find(_SERVER, "REQUEST_SCHEME", sizeof("REQUEST_SCHEME")-1);
@@ -346,54 +390,63 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 			url = zend_hash_str_find(_SERVER, "REQUEST_URI", sizeof("REQUEST_URI")-1);
 			user_agent = zend_hash_str_find(_SERVER, "HTTP_USER_AGENT", sizeof("HTTP_USER_AGENT")-1);
 
-			smart_str_append_ex(&buf, Z_STR_P(method), 0);
-			smart_str_appendc_ex(&buf, ' ', 0);
-			smart_str_append_ex(&buf, Z_STR_P(scheme), 0);
-			smart_str_appendl_ex(&buf, "://", 3, 0);
-			smart_str_append_ex(&buf, Z_STR_P(host), 0);
-			smart_str_append_ex(&buf, Z_STR_P(url), 0);
+			smart_str_append_ex(&rbuf, Z_STR_P(method), 0);
+			smart_str_appendc_ex(&rbuf, ' ', 0);
+			smart_str_append_ex(&rbuf, Z_STR_P(scheme), 0);
+			smart_str_appendl_ex(&rbuf, "://", 3, 0);
+			smart_str_append_ex(&rbuf, Z_STR_P(host), 0);
+			smart_str_append_ex(&rbuf, Z_STR_P(url), 0);
 			if(user_agent) {
-				smart_str_appendl_ex(&buf, " \"", 2, 0);
-				smart_str_append_ex(&buf, Z_STR_P(user_agent), 0);
-				smart_str_appendc_ex(&buf, '"', 0);
+				smart_str_appendl_ex(&rbuf, " \"", 2, 0);
+				smart_str_append_ex(&rbuf, Z_STR_P(user_agent), 0);
+				smart_str_appendc_ex(&rbuf, '"', 0);
 			} else {
-				smart_str_appendl_ex(&buf, " \"-\"", 4, 0);
+				smart_str_appendl_ex(&rbuf, " \"-\"", 4, 0);
 			}
 
 			ctlname = "REQUEST";
 		}
 
-		smart_str_0(&buf);
-		SYSLOG("%s: %s", ctlname, ZSTR_VAL(buf.s));
-		smart_str_free(&buf);
+		smart_str_0(&rbuf);
+		smart_str_0(&hbuf);
 
-		if(SG(request_info).path_translated) {
-			SYSLOG("PATH_TRANSLATED: %s", SG(request_info).path_translated);
+		if(SG(request_info).request_body) {
+			php_stream_rewind(SG(request_info).request_body);
+			post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
 		}
-		if(SG(request_info).request_uri) {
-			SYSLOG("REQUEST_URI: %s", SG(request_info).request_uri);
+
+#if ASYNCLOG_DEBUG
+		SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
+		SYSLOG("STATUS: %d", status);
+		if(hbuf.s) {
+			SYSLOG("HEADERS: %s", ZSTR_VAL(hbuf.s) + strlen(PHP_EOL));
 		}
-		if(SG(request_info).content_length){
+		SYSLOG("GLOBALS: %f - %.3fms - %s", t, (t - ASYNCLOG_G(restime)) * 1000, ZSTR_VAL(gbuf.s));
+		if(SG(request_info).content_length) {
 			SYSLOG("CONTENT_TYPE: %s", SG(request_info).content_type);
 			SYSLOG("CONTENT_LENGTH: %ld", SG(request_info).content_length);
 		}
+		if(post_data_str) {
+			SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
+		}
+		if(ASYNCLOG_G(output_len)) {
+			SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
+			SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
+		}
+#endif
 
-		if(SG(request_info).request_body) {
-			zend_string *post_data_str = NULL;
+		log_end_request(ctlname, rbuf.s, gbuf.s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s);
 
-			php_stream_rewind(SG(request_info).request_body);
-			post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
-			if(post_data_str) {
-				SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
-
-				zend_string_free(post_data_str);
-			}
+		if(post_data_str) {
+			zend_string_free(post_data_str);
 		}
 	}
 
 end:
-	zval_ptr_dtor(&globals);
 	smart_str_free(&ASYNCLOG_G(output));
+	smart_str_free(&gbuf);
+	smart_str_free(&hbuf);
+	smart_str_free(&rbuf);
 
 #if ASYNCLOG_DEBUG
 	{
