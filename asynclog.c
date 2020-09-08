@@ -3,6 +3,9 @@
 #endif
 
 #include <string.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "php.h"
 #include "php_ini.h"
@@ -12,6 +15,7 @@
 #include "standard/info.h"
 #include "standard/php_var.h"
 #include "json/php_json.h"
+#include "fastcgi.h"
 
 #include "api.h"
 #include "php_asynclog.h"
@@ -57,6 +61,17 @@ static void php_asynclog_output_handler(char *output, size_t output_len, char **
 	ASYNCLOG_G(output_len) += output_len;
 	if(ASYNCLOG_G(max_output) <= 0 || smart_str_get_len(&ASYNCLOG_G(output)) + output_len < ASYNCLOG_G(max_output)) {
 		smart_str_appendl(&ASYNCLOG_G(output), output, output_len);
+	}
+}
+
+static void sig_handler(int sig) {
+	SYSLOG("SIG: %d", sig);
+
+	ASYNCLOG_G(is_shutdown) = 1;
+
+	if((EG(flags) & EG_FLAGS_IN_SHUTDOWN)) {
+		SYSLOG("FCGI SHUTDOWN");
+		log_destroy();
 	}
 }
 
@@ -189,6 +204,7 @@ PHP_GINIT_FUNCTION(asynclog) {
 
 	asynclog_globals->output_len = 0;
 	asynclog_globals->max_output = 0;
+	asynclog_globals->is_shutdown = 0;
 
 	memset(&asynclog_globals->output, sizeof(smart_str), 0);
 }
@@ -252,6 +268,33 @@ PHP_RINIT_FUNCTION(asynclog) {
 
 	log_begin_request();
 
+#if ASYNCLOG_DEBUG
+	{
+		sapi_header_line ctr = {0};
+
+		ctr.line_len = spprintf(&ctr.line, 0, "PID: %d/%d", getpid(), getppid());
+		ctr.response_code = 0;
+
+		sapi_header_op(SAPI_HEADER_ADD, &ctr);
+	}
+#endif
+
+	if(!strcmp(sapi_module.name, "fpm-fcgi")) {
+		signal(SIGUSR1, sig_handler);
+		signal(SIGUSR2, sig_handler);
+		signal(SIGTERM, sig_handler);
+		signal(SIGQUIT, sig_handler);
+	}
+
+	if (PG(auto_globals_jit)) {
+		zend_is_auto_global_str(ZEND_STRL("_POST"));
+		zend_is_auto_global_str(ZEND_STRL("_GET"));
+		zend_is_auto_global_str(ZEND_STRL("_COOKIE"));
+		zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+		zend_is_auto_global_str(ZEND_STRL("_ENV"));
+		zend_is_auto_global_str(ZEND_STRL("_FILES"));
+	}
+
 	return SUCCESS;
 }
 
@@ -266,11 +309,10 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 	smart_str gbuf = {0}, hbuf = {0}, rbuf = {0};
 	zend_long i;
-	double t = ASYNCLOG_G(restime);
 
 	{
-		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_FILES};
-		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_FILES"};
+		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_ENV, TRACK_VARS_FILES};
+		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_ENV", "_FILES"};
 		zval *var;
 		zval globals;
 
@@ -333,6 +375,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 			zval_ptr_dtor(&globals);
 			smart_str_0(&gbuf);
 		} else {
+			zval_ptr_dtor(&globals);
 			SYSLOG("GLOBALS: Is empty");
 			goto end;
 		}
@@ -416,12 +459,16 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		}
 
 #if ASYNCLOG_DEBUG
-		SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
+		if(rbuf.s) {
+			SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
+		}
 		SYSLOG("STATUS: %d", status);
 		if(hbuf.s) {
 			SYSLOG("HEADERS: %s", ZSTR_VAL(hbuf.s) + strlen(PHP_EOL));
 		}
-		SYSLOG("GLOBALS: %f - %.3fms - %s", t, (t - ASYNCLOG_G(restime)) * 1000, ZSTR_VAL(gbuf.s));
+		if(gbuf.s) {
+			SYSLOG("GLOBALS: %s", ZSTR_VAL(gbuf.s));
+		}
 		if(SG(request_info).content_length) {
 			SYSLOG("CONTENT_TYPE: %s", SG(request_info).content_type);
 			SYSLOG("CONTENT_LENGTH: %ld", SG(request_info).content_length);
@@ -450,10 +497,16 @@ end:
 
 #if ASYNCLOG_DEBUG
 	{
-		double t2 = microtime();
-		SYSLOG("RSHUTDOWN END: %f - %.3fms - %.3fms\n", t2, (t2 - t) * 1000, (t2 - ASYNCLOG_G(restime)) * 1000);
+		double t = microtime();
+		SYSLOG("RSHUTDOWN END: %f - %.3fms\n", t, (t - ASYNCLOG_G(restime)) * 1000);
 	}
 #endif
+
+	if(ASYNCLOG_G(is_shutdown)) {
+		SYSLOG("FCGI SHUTDOWN");
+
+		log_destroy();
+	}
 
 	return SUCCESS;
 }

@@ -62,6 +62,8 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 	smart_str output;
 	zend_long output_len;
 	zend_long max_output;
+
+	char is_shutdown;
 ZEND_END_MODULE_GLOBALS(asynclog)
 
 #define ASYNCLOG_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(asynclog, v)
