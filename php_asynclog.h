@@ -46,9 +46,12 @@ extern zend_module_entry asynclog_module_entry;
 #endif
 
 ZEND_BEGIN_MODULE_GLOBALS(asynclog)
+	// run time
 	double     reqtime;
 	double     itertime;
 	double     restime;
+
+	// php.ini config
 	zend_long  threads;
 	zend_long  type;
 	zend_long  level;
@@ -58,13 +61,17 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 	char *redis_auth;
 	char *elastic;
 	char *category;
+	zend_long max_output;
+	zend_long max_logs;
 
+	// response buffer
 	smart_str output;
 	zend_long output_len;
-	zend_long max_output;
 
-	char is_shutdown;
+	char is_shutdown; // The php-fpm worker process pool is stoping or reloading
 ZEND_END_MODULE_GLOBALS(asynclog)
+
+ZEND_EXTERN_MODULE_GLOBALS(asynclog);
 
 #define ASYNCLOG_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(asynclog, v)
 

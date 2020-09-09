@@ -18,7 +18,7 @@ log_status_t log_elastic_begin_request() {
 	return SUCCESS;
 }
 
-log_status_t log_elastic_push(const char *name, const char *level, const char *message, const zend_string *data, const char *category, double runTime) {
+log_status_t log_elastic_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration) {
 	return SUCCESS;
 }
 

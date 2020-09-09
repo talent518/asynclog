@@ -14,11 +14,15 @@ log_status_t log_redis_write() {
 	return SUCCESS;
 }
 
-log_status_t log_redis_push(const char *name, const char *level, const char *message, const zend_string *data, const char *category) {
+log_status_t log_redis_begin_request() {
 	return SUCCESS;
 }
 
-log_status_t log_redis_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output) {
+log_status_t log_redis_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration) {
+	return SUCCESS;
+}
+
+log_status_t log_redis_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output) {
 	return SUCCESS;
 }
 

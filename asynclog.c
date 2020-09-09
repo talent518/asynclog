@@ -34,14 +34,17 @@ PHP_INI_BEGIN()
     STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_SYSTEM, OnUpdateString, elastic,    zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.category",             "application", PHP_INI_SYSTEM, OnUpdateString, category,   zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.max_output",                     "0", PHP_INI_SYSTEM, OnUpdateString, max_output, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.max_logs",                   "10000", PHP_INI_SYSTEM, OnUpdateLong, max_logs,   zend_asynclog_globals, asynclog_globals)
 PHP_INI_END()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 3)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 5)
 	ZEND_ARG_TYPE_INFO(0, name, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, category, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO(0, level, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, message, IS_STRING, 0)
 	ZEND_ARG_INFO(0, data)
-	ZEND_ARG_TYPE_INFO(0, category, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, timestamp, IS_DOUBLE, 0)
+	ZEND_ARG_TYPE_INFO(0, duration, IS_DOUBLE, 0)
 ZEND_END_ARG_INFO()
 
 static void php_head_apply_header_list_to_hash(void *data, void *arg) {
@@ -71,7 +74,7 @@ static void sig_handler(int sig) {
 
 	if((EG(flags) & EG_FLAGS_IN_SHUTDOWN)) {
 		SYSLOG("FCGI SHUTDOWN");
-		log_destroy();
+		// log_destroy();
 	}
 }
 
@@ -95,12 +98,14 @@ PHP_FUNCTION(asynclog) {
 	zend_string *ret;
 
 	double itertime = microtime(), t;
+	double timestamp = itertime;
+	double duration = -1;
 
-	if (zend_parse_parameters_throw(ZEND_NUM_ARGS(), "sls|as", &name, &name_len, &level, &message, &message_len, &data, &category, &category_len) == FAILURE) {
+	if (zend_parse_parameters_throw(ZEND_NUM_ARGS(), "sslsa|dd", &name, &name_len, &category, &category_len, &level, &message, &message_len, &data, &timestamp, &duration) == FAILURE) {
 		return;
 	}
 
-	INILOG(FUNC);
+	// INILOG(FUNC);
 
 	if((ASYNCLOG_G(level) & level) != level) {
 		RETURN_FALSE;
@@ -134,9 +139,13 @@ PHP_FUNCTION(asynclog) {
 
 	ASYNCLOG_G(itertime) = itertime;
 
+	if(duration < 0) {
+		duration = t;
+	}
+
 	if(data) {
 		if(Z_TYPE_P(data) == IS_STRING) {
-			log_push(name, levelstr, message, Z_STR_P(data), category, t);
+			// log_push(name, category, levelstr, message, Z_STR_P(data), timestamp, duration);
 		} else if(php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
 			smart_str_free(&buf);
 
@@ -170,16 +179,16 @@ PHP_FUNCTION(asynclog) {
 			smart_str_0(&buf);
 
 			SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
-			log_push(name, levelstr, message, buf.s, category, t);
+			// log_push(name, category, levelstr, message, buf.s, timestamp, duration);
 
 			smart_str_free(&buf);
 		} else {
 			SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
-			log_push(name, levelstr, message, NULL, category, t);
+			// log_push(name, category, levelstr, message, NULL, timestamp, duration);
 		}
 	} else {
 		SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
-		log_push(name, levelstr, message, NULL, category, t);
+		// log_push(name, category, levelstr, message, NULL, timestamp, duration);
 	}
 
 	RETURN_TRUE;
@@ -217,9 +226,6 @@ PHP_GSHUTDOWN_FUNCTION(asynclog) {
 
 PHP_MINIT_FUNCTION(asynclog) {
 	SYSLOG("MINIT");
-	INILOG(MINIT);
-
-	REGISTER_INI_ENTRIES();
 
 	REGISTER_STRING_CONSTANT("ASYNCLOG_VERSION",     PHP_ASYNCLOG_VERSION,       CONST_CS | CONST_PERSISTENT);
 
@@ -234,7 +240,11 @@ PHP_MINIT_FUNCTION(asynclog) {
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_VERBOSE", PHP_ASYNCLOG_LEVEL_VERBOSE, CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("ASYNCLOG_LEVEL_ALL",     PHP_ASYNCLOG_LEVEL_ALL,     CONST_CS | CONST_PERSISTENT);
 
-	log_init();
+	REGISTER_INI_ENTRIES();
+
+	INILOG(MINIT);
+
+	// log_init();
 
 	return SUCCESS;
 }
@@ -245,7 +255,7 @@ PHP_MSHUTDOWN_FUNCTION(asynclog) {
 
 	UNREGISTER_INI_ENTRIES();
 
-	log_destroy();
+	// log_destroy();
 
 	return SUCCESS;
 }
@@ -266,7 +276,7 @@ PHP_RINIT_FUNCTION(asynclog) {
 		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, PHP_OUTPUT_HANDLER_ALIGNTO_SIZE, PHP_OUTPUT_HANDLER_STDFLAGS);
 	}
 
-	log_begin_request();
+	// log_begin_request();
 
 #if ASYNCLOG_DEBUG
 	{
@@ -482,7 +492,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		}
 #endif
 
-		log_end_request(ctlname, rbuf.s, gbuf.s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s);
+		// log_end_request(ctlname, rbuf.s, gbuf.s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s);
 
 		if(post_data_str) {
 			zend_string_free(post_data_str);
@@ -505,7 +515,7 @@ end:
 	if(ASYNCLOG_G(is_shutdown)) {
 		SYSLOG("FCGI SHUTDOWN");
 
-		log_destroy();
+		// log_destroy();
 	}
 
 	return SUCCESS;
@@ -520,6 +530,11 @@ PHP_MINFO_FUNCTION(asynclog) {
 	php_info_print_table_end();
 
 	DISPLAY_INI_ENTRIES();
+}
+
+static int php_asynclog_post_deactivate(void) {
+	INILOG(POST_DEACTIVATE);
+	return SUCCESS;
 }
 
 const zend_function_entry asynclog_functions[] = {
@@ -540,7 +555,7 @@ zend_module_entry asynclog_module_entry = {
 	PHP_MODULE_GLOBALS(asynclog),
 	PHP_GINIT(asynclog),
 	PHP_GSHUTDOWN(asynclog),
-	NULL,
+	php_asynclog_post_deactivate,
 	STANDARD_MODULE_PROPERTIES_EX
 };
 

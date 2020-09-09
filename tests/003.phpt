@@ -4,7 +4,7 @@ asynclog('file', ASYNCLOG_LEVEL_INFO, 'tests/003.phpt')
 <?php if (!function_exists("asynclog")) print "skip"; ?>
 --FILE--
 <?php
-var_export(asynclog('file', ASYNCLOG_LEVEL_INFO, 'tests/003.phpt'));
+var_export(asynclog('file', 'test', ASYNCLOG_LEVEL_INFO, 'tests/003.phpt', []));
 ?>
 --EXPECT--
 true
