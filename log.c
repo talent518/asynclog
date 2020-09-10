@@ -4,8 +4,9 @@
 #include "log_elastic.h"
 
 #include <stdio.h>
-#include <semaphore.h>
+#include <stdlib.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <time.h>
 
 typedef log_status_t (*handler_t)();
@@ -14,6 +15,7 @@ typedef log_status_t (*end_request_t)(const char *ctlname, const zend_string *re
 
 static volatile int is_inited = 0;
 static volatile int is_running = 0;
+static sem_t msem; // max_logs for sem
 static sem_t qsem; // queue for sem
 static sem_t dsem; // destroy for sem
 static sem_t lsem; // lock for sem
@@ -26,15 +28,17 @@ static pthread_attr_t attr;
 static char stackaddr[8*1024*1024];
 
 static void *log_write(void *arg) {
+	int n = 0;
 	SYSLOG("WORKER BEGIN");
 	sem_post(&dsem);
 	do {
 		sem_wait(&qsem);
+		SYSLOG("WORKER: %d", n);
 	} while(write_handler() == SUCCESS);
 	sem_post(&dsem);
 	SYSLOG("WORKER END");
 
-	pthread_detach(&thread);
+	pthread_detach(thread);
 	pthread_exit(NULL);
 
 	return NULL;
@@ -97,7 +101,8 @@ log_status_t log_init() {
 	} else if(value > 1000000) {
 		value = 1000000;
 	}
-	sem_init(&qsem, 0, value);
+	sem_init(&msem, 0, value);
+	sem_init(&qsem, 0, 0);
 	sem_init(&dsem, 0, 0);
 	sem_init(&lsem, 0, 1);
 	SYSLOG("MAX_LOGS: %u", value);
@@ -124,25 +129,33 @@ void log_unlock() {
 	sem_post(&lsem);
 }
 
+void log_mwait() {
+	sem_wait(&msem);
+}
+
+void log_mpost() {
+	sem_post(&msem);
+}
+
 log_status_t log_begin_request() {
 	return SUCCESS;
 }
 
 log_status_t log_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration) {
-	if(is_inited == 0 && log_init() != SUCCESS || is_inited < 0) return FAILURE;
+	if(is_inited == 0 && log_init() == FAILURE || is_inited < 0) return FAILURE;
 
 	return push_handler(name, category, level, message, data, timestamp, duration);
 }
 
 log_status_t log_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output) {
-	if(is_inited == 0 && log_init() != SUCCESS || is_inited < 0) return FAILURE;
+	if(is_inited == 0 && log_init() == FAILURE || is_inited < 0) return FAILURE;
 
 	return end_request_handler(ctlname, request, globals, content_type, content_length, status, headers, output);
 }
 
-log_status_t log_destroy() {
+void log_destroy() {
 	if(is_inited <= 0) {
-		return FAILURE;
+		return;
 	}
 
 	SYSLOG("LOG_DESTROY");
@@ -154,6 +167,7 @@ log_status_t log_destroy() {
 
 	SYSLOG("LOG_DESTROY 1");
 
+	sem_destroy(&msem);
 	sem_destroy(&qsem);
 	sem_destroy(&dsem);
 	sem_destroy(&lsem);
@@ -162,5 +176,9 @@ log_status_t log_destroy() {
 
 	is_inited = 0;
 
-	return destroy_handler();
+	if(destroy_handler() == FAILURE) {
+		SYSLOG("LOG_DESTROY failure");
+	}
+
+	exit(EG(exit_status));
 }

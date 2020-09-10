@@ -30,11 +30,12 @@ class AsynclogTarget extends Target {
 				break;
 			case Logger::LEVEL_PROFILE_BEGIN:
 				$level = ASYNCLOG_LEVEL_VERBOSE;
-				$hash = md5(json_encode($token));
+				$hash = md5(json_encode($message));
 				$this->stack[$hash] = $msg;
 				return;
 			case Logger::LEVEL_PROFILE_END:
 				$level = ASYNCLOG_LEVEL_VERBOSE;
+				$hash = md5(json_encode($message));
 				if (isset($this->stack[$hash])) {
 					@list($message, , $category, $timestamp2, $traces, $memory2) = $this->stack[$hash];
 					unset($this->stack[$hash]);

@@ -34,7 +34,6 @@ PHP_INI_BEGIN()
     STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_SYSTEM, OnUpdateString, elastic,    zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.category",             "application", PHP_INI_SYSTEM, OnUpdateString, category,   zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.max_output",                     "0", PHP_INI_SYSTEM, OnUpdateString, max_output, zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.max_logs",                   "10000", PHP_INI_SYSTEM, OnUpdateLong, max_logs,   zend_asynclog_globals, asynclog_globals)
 PHP_INI_END()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 5)
@@ -71,11 +70,6 @@ static void sig_handler(int sig) {
 	SYSLOG("SIG: %d", sig);
 
 	ASYNCLOG_G(is_shutdown) = 1;
-
-	if((EG(flags) & EG_FLAGS_IN_SHUTDOWN)) {
-		SYSLOG("FCGI SHUTDOWN");
-		// log_destroy();
-	}
 }
 
 PHP_FUNCTION(asynclog) {
@@ -145,7 +139,7 @@ PHP_FUNCTION(asynclog) {
 
 	if(data) {
 		if(Z_TYPE_P(data) == IS_STRING) {
-			// log_push(name, category, levelstr, message, Z_STR_P(data), timestamp, duration);
+			log_push(name, category, levelstr, message, Z_STR_P(data), timestamp, duration);
 		} else if(php_json_encode(&buf, data, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
 			smart_str_free(&buf);
 
@@ -179,16 +173,16 @@ PHP_FUNCTION(asynclog) {
 			smart_str_0(&buf);
 
 			SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
-			// log_push(name, category, levelstr, message, buf.s, timestamp, duration);
+			log_push(name, category, levelstr, message, buf.s, timestamp, duration);
 
 			smart_str_free(&buf);
 		} else {
 			SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
-			// log_push(name, category, levelstr, message, NULL, timestamp, duration);
+			log_push(name, category, levelstr, message, NULL, timestamp, duration);
 		}
 	} else {
 		SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
-		// log_push(name, category, levelstr, message, NULL, timestamp, duration);
+		log_push(name, category, levelstr, message, NULL, timestamp, duration);
 	}
 
 	RETURN_TRUE;
@@ -213,7 +207,8 @@ PHP_GINIT_FUNCTION(asynclog) {
 
 	asynclog_globals->output_len = 0;
 	asynclog_globals->max_output = 0;
-	asynclog_globals->is_shutdown = 0;
+	asynclog_globals->is_shutdown= 0;
+	asynclog_globals->is_signal  = 0;
 
 	memset(&asynclog_globals->output, sizeof(smart_str), 0);
 }
@@ -244,7 +239,9 @@ PHP_MINIT_FUNCTION(asynclog) {
 
 	INILOG(MINIT);
 
-	// log_init();
+	if(strcmp(sapi_module.name, "fpm-fcgi")) {
+		log_init();
+	}
 
 	return SUCCESS;
 }
@@ -255,7 +252,7 @@ PHP_MSHUTDOWN_FUNCTION(asynclog) {
 
 	UNREGISTER_INI_ENTRIES();
 
-	// log_destroy();
+	log_destroy();
 
 	return SUCCESS;
 }
@@ -276,10 +273,10 @@ PHP_RINIT_FUNCTION(asynclog) {
 		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, PHP_OUTPUT_HANDLER_ALIGNTO_SIZE, PHP_OUTPUT_HANDLER_STDFLAGS);
 	}
 
-	// log_begin_request();
+	log_begin_request();
 
 #if ASYNCLOG_DEBUG
-	{
+	if(!sapi_module.phpinfo_as_text) {
 		sapi_header_line ctr = {0};
 
 		ctr.line_len = spprintf(&ctr.line, 0, "PID: %d/%d", getpid(), getppid());
@@ -289,11 +286,12 @@ PHP_RINIT_FUNCTION(asynclog) {
 	}
 #endif
 
-	if(!strcmp(sapi_module.name, "fpm-fcgi")) {
-		signal(SIGUSR1, sig_handler);
-		signal(SIGUSR2, sig_handler);
-		signal(SIGTERM, sig_handler);
-		signal(SIGQUIT, sig_handler);
+	if(!ASYNCLOG_G(is_signal) && !strcmp(sapi_module.name, "fpm-fcgi")) {
+		zend_signal(SIGUSR1, sig_handler);
+		zend_signal(SIGUSR2, sig_handler);
+		zend_signal(SIGTERM, sig_handler);
+		zend_signal(SIGQUIT, sig_handler);
+		ASYNCLOG_G(is_signal) = 1;
 	}
 
 	if (PG(auto_globals_jit)) {
@@ -492,10 +490,10 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		}
 #endif
 
-		// log_end_request(ctlname, rbuf.s, gbuf.s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s);
+		log_end_request(ctlname, rbuf.s, gbuf.s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s);
 
 		if(post_data_str) {
-			zend_string_free(post_data_str);
+			zend_string_release_ex(post_data_str, 0);
 		}
 	}
 
@@ -515,7 +513,7 @@ end:
 	if(ASYNCLOG_G(is_shutdown)) {
 		SYSLOG("FCGI SHUTDOWN");
 
-		// log_destroy();
+		log_destroy();
 	}
 
 	return SUCCESS;
