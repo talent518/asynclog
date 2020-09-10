@@ -40,7 +40,7 @@ class AsynclogTarget extends Target {
 					@list($message, , $category, $timestamp2, $traces, $memory2) = $this->stack[$hash];
 					unset($this->stack[$hash]);
 					$data['timestamp'] = $timestamp2;
-					$data['duration'] = $timestamp - $timestamp2;
+					$data['duration'] = ($timestamp - $timestamp2) * 1000;
 					$data['memoryDiff'] = $memory - $memory2;
 					ksort($data);
 					break;

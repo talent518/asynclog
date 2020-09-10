@@ -11,7 +11,7 @@
 
 typedef log_status_t (*handler_t)();
 typedef log_status_t (*push_handler_t)(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration);
-typedef log_status_t (*end_request_t)(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output);
+typedef log_status_t (*end_request_t)(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output, const zend_string *post_data_str);
 
 static volatile int is_inited = 0;
 static volatile int is_running = 0;
@@ -147,10 +147,10 @@ log_status_t log_push(const char *name, const char *category, const char *level,
 	return push_handler(name, category, level, message, data, timestamp, duration);
 }
 
-log_status_t log_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output) {
+log_status_t log_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output, const zend_string *post_data_str) {
 	if(is_inited == 0 && log_init() == FAILURE || is_inited < 0) return FAILURE;
 
-	return end_request_handler(ctlname, request, globals, content_type, content_length, status, headers, output);
+	return end_request_handler(ctlname, request, globals, content_type, content_length, status, headers, output, post_data_str);
 }
 
 void log_destroy() {

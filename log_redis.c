@@ -22,7 +22,7 @@ log_status_t log_redis_push(const char *name, const char *category, const char *
 	return SUCCESS;
 }
 
-log_status_t log_redis_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output) {
+log_status_t log_redis_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output, const zend_string *post_data_str) {
 	return SUCCESS;
 }
 

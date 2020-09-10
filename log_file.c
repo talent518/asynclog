@@ -70,7 +70,7 @@ log_status_t log_file_begin_request() {
 }
 
 log_status_t log_file_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration) {
-	size_t size = snprintf(NULL, 0, "[%s][%s][%s] - %.3fms === %s >>> %s", "2020-09-09 00:00:00", category, level, duration, message, data ? ZSTR_VAL(data) : "");
+	size_t size = snprintf(NULL, 0, "[%s][%s][%s] - %.3fms" "\n=== MESSAGE ===\n" "%s" "\n=== DATA ===\n" "%s", "2020-09-09 00:00:00", category, level, duration, message, data ? ZSTR_VAL(data) : "");
 	log_file_t *p = (log_file_t*) malloc(sizeof(log_file_t) + size);
 	char timestr[20] = "";
 	struct tm *tm;
@@ -84,7 +84,7 @@ log_status_t log_file_push(const char *name, const char *category, const char *l
 	SYSLOG("NAME: %s-%d%02d%02d", name, tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday);
 
 	snprintf(p->name, sizeof(p->name), "%s-%d%02d%02d", name, tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday);
-	p->size = snprintf(p->data, size + sizeof(p->data), "[%s][%s][%s] - %.3fms === %s >>> %s", timestr, category, level, duration, message, data ? ZSTR_VAL(data) : "");
+	p->size = snprintf(p->data, size + sizeof(p->data), "[%s][%s][%s] - %.3fms" "\n=== MESSAGE ===\n" "%s" "\n=== DATA ===\n" "%s", timestr, category, level, duration, message, data ? ZSTR_VAL(data) : "");
 
 	SYSLOG("FILE PUSH END: %lu %lu", size, p->size);
 
@@ -93,8 +93,8 @@ log_status_t log_file_push(const char *name, const char *category, const char *l
 	return SUCCESS;
 }
 
-log_status_t log_file_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output) {
-	size_t size = snprintf(NULL, 0, "[%s] %s - %.3fms - %s %ld == %d >> %s === %s >>> %s", "2020-09-09 00:00:00", ZSTR_VAL(request), 0.00f, content_type ? content_type : "", content_length, status, headers ? ZSTR_VAL(headers) : "", output ? ZSTR_VAL(output) : "", globals ? ZSTR_VAL(globals) : "");
+log_status_t log_file_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output, const zend_string *post_data_str) {
+	size_t size = snprintf(NULL, 0, "[%s] %s - %.3fms - %s - %ld == %d" "\n=== HEADER ===" "%s" "\n=== OUTPUT ===\n" "%s" "\n=== GLOBALS ===\n" "%s" "\n=== REQUEST BODY ===\n" "%s", "2020-09-09 00:00:00", ZSTR_VAL(request), 0.00f, content_length > 0 && content_type ? content_type : "NONETYPE", content_length, status, headers ? ZSTR_VAL(headers) : "\n", output ? ZSTR_VAL(output) : "", globals ? ZSTR_VAL(globals) : "", post_data_str ? ZSTR_VAL(post_data_str) : "");
 	log_file_t *p = (log_file_t*) malloc(sizeof(log_file_t) + size);
 	char timestr[20] = "";
 	struct tm *tm;
@@ -109,7 +109,7 @@ log_status_t log_file_end_request(const char *ctlname, const zend_string *reques
 	SYSLOG("CTLNAME: %s-%d%02d%02d", ctlname, tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday);
 
 	snprintf(p->name, sizeof(p->name), "%s-%d%02d%02d", ctlname, tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday);
-	p->size = snprintf(p->data, size, "[%s] %s - %.3fms - %s %ld == %d >> %s === %s >>> %s", timestr, ZSTR_VAL(request), duration, content_type ? content_type : "", content_length, status, headers ? ZSTR_VAL(headers) : "", output ? ZSTR_VAL(output) : "", globals ? ZSTR_VAL(globals) : "");
+	p->size = snprintf(p->data, size + sizeof(p->data), "[%s] %s - %.3fms - %s %ld == %d" "\n=== HEADER ===" "%s" "\n=== OUTPUT ===\n" "%s" "\n=== GLOBALS ===\n" "%s" "\n=== REQUEST BODY ===\n" "%s", timestr, ZSTR_VAL(request), duration, content_length > 0 && content_type ? content_type : "NONETYPE", content_length, status, headers ? ZSTR_VAL(headers) : "\n", output ? ZSTR_VAL(output) : "", globals ? ZSTR_VAL(globals) : "", post_data_str ? ZSTR_VAL(post_data_str) : "");
 
 	SYSLOG("FILE REQ END: %lu %lu", size, p->size);
 

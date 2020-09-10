@@ -46,6 +46,10 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 5)
 	ZEND_ARG_TYPE_INFO(0, duration, IS_DOUBLE, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog_shutdown, 0, 0, 1)
+	ZEND_ARG_TYPE_INFO(0, source, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
 static void php_head_apply_header_list_to_hash(void *data, void *arg) {
 	sapi_header_struct *sapi_header = (sapi_header_struct *)data;
 	smart_str *buf = (smart_str *) arg;
@@ -57,8 +61,12 @@ static void php_head_apply_header_list_to_hash(void *data, void *arg) {
 }
 
 static void php_asynclog_output_handler(char *output, size_t output_len, char **handled_output, size_t *handled_output_len, int mode) {
-	*handled_output = output;
-	*handled_output_len = output_len;
+	if(!output || !output_len) {
+		return;
+	}
+
+	// *handled_output = output;
+	// *handled_output_len = output_len;
 
 	ASYNCLOG_G(output_len) += output_len;
 	if(ASYNCLOG_G(max_output) <= 0 || smart_str_get_len(&ASYNCLOG_G(output)) + output_len < ASYNCLOG_G(max_output)) {
@@ -188,6 +196,71 @@ PHP_FUNCTION(asynclog) {
 	RETURN_TRUE;
 }
 
+PHP_FUNCTION(asynclog_shutdown) {
+	const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_ENV, TRACK_VARS_FILES};
+	const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_ENV", "_FILES"};
+	register int i;
+	zval *var;
+	zval globals;
+
+	array_init_size(&globals, 5);
+	for(i=0; i<sizeof(keys)/sizeof(const int); i++) {
+		var = &PG(http_globals)[keys[i]];
+		// var = zend_hash_str_find(&EG(symbol_table), vars[i], strlen(vars[i]));
+		if(Z_TYPE_P(var) == IS_ARRAY && zend_hash_num_elements(Z_ARRVAL_P(var))) {
+			// Z_ADDREF_P(var);
+			add_assoc_zval(&globals, vars[i], var);
+		}
+	}
+
+	if(php_json_encode(&ASYNCLOG_G(globals), &globals, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
+		switch(JSON_G(error_code)) {
+			case PHP_JSON_ERROR_NONE:
+				SYSLOG("GLOBALS: No error");
+				break;
+			case PHP_JSON_ERROR_DEPTH:
+				SYSLOG("GLOBALS: Maximum stack depth exceeded");
+				break;
+			case PHP_JSON_ERROR_STATE_MISMATCH:
+				SYSLOG("GLOBALS: State mismatch (invalid or malformed JSON)");
+				break;
+			case PHP_JSON_ERROR_CTRL_CHAR:
+				SYSLOG("GLOBALS: Control character error, possibly incorrectly encoded");
+				break;
+			case PHP_JSON_ERROR_SYNTAX:
+				SYSLOG("GLOBALS: Syntax error");
+				break;
+			case PHP_JSON_ERROR_UTF8:
+				SYSLOG("GLOBALS: Malformed UTF-8 characters, possibly incorrectly encoded");
+				break;
+			case PHP_JSON_ERROR_RECURSION:
+				SYSLOG("GLOBALS: Recursion detected");
+				break;
+			case PHP_JSON_ERROR_INF_OR_NAN:
+				SYSLOG("GLOBALS: Inf and NaN cannot be JSON encoded");
+				break;
+			case PHP_JSON_ERROR_UNSUPPORTED_TYPE:
+				SYSLOG("GLOBALS: Type is not supported");
+				break;
+			case PHP_JSON_ERROR_INVALID_PROPERTY_NAME:
+				SYSLOG("GLOBALS: The decoded property name is invalid");
+				break;
+			case PHP_JSON_ERROR_UTF16:
+				SYSLOG("GLOBALS: Single unpaired UTF-16 surrogate in unicode escape");
+				break;
+			default:
+				SYSLOG("GLOBALS: Unknown error");
+				break;
+		}
+	} else if(ASYNCLOG_G(globals).s) {
+		smart_str_0(&ASYNCLOG_G(globals));
+	} else {
+		SYSLOG("GLOBALS: Is empty");
+	}
+
+	zval_ptr_dtor(&globals);
+}
+
 PHP_GINIT_FUNCTION(asynclog) {
 	OPENLOG();
 
@@ -210,6 +283,7 @@ PHP_GINIT_FUNCTION(asynclog) {
 	asynclog_globals->is_shutdown= 0;
 	asynclog_globals->is_signal  = 0;
 
+	memset(&asynclog_globals->globals, sizeof(smart_str), 0);
 	memset(&asynclog_globals->output, sizeof(smart_str), 0);
 }
 
@@ -270,7 +344,7 @@ PHP_RINIT_FUNCTION(asynclog) {
 
 	if(!sapi_module.phpinfo_as_text) {
 		ASYNCLOG_G(output_len) = 0;
-		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, PHP_OUTPUT_HANDLER_ALIGNTO_SIZE, PHP_OUTPUT_HANDLER_STDFLAGS);
+		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, 0, PHP_OUTPUT_HANDLER_STDFLAGS);
 	}
 
 	log_begin_request();
@@ -294,13 +368,22 @@ PHP_RINIT_FUNCTION(asynclog) {
 		ASYNCLOG_G(is_signal) = 1;
 	}
 
-	if (PG(auto_globals_jit)) {
-		zend_is_auto_global_str(ZEND_STRL("_POST"));
-		zend_is_auto_global_str(ZEND_STRL("_GET"));
-		zend_is_auto_global_str(ZEND_STRL("_COOKIE"));
-		zend_is_auto_global_str(ZEND_STRL("_SERVER"));
-		zend_is_auto_global_str(ZEND_STRL("_ENV"));
-		zend_is_auto_global_str(ZEND_STRL("_FILES"));
+	zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+
+	{
+		/* create shutdown function */
+		php_shutdown_function_entry shutdown_function_entry;
+		shutdown_function_entry.arg_count = 1;
+		shutdown_function_entry.arguments = (zval *) safe_emalloc(sizeof(zval), 1, 0);
+
+		ZVAL_STRING(&shutdown_function_entry.arguments[0], "asynclog_shutdown");
+
+		/* add shutdown function, removing the old one if it exists */
+		if (!register_user_shutdown_function("asynclog_shutdown", sizeof("asynclog_shutdown") - 1, &shutdown_function_entry)) {
+			zval_ptr_dtor(&shutdown_function_entry.arguments[0]);
+			efree(shutdown_function_entry.arguments);
+			php_error_docref(NULL, E_WARNING, "Unable to register asynclog shutdown function");
+		}
 	}
 
 	return SUCCESS;
@@ -315,191 +398,119 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 	smart_str_0(&ASYNCLOG_G(output));
 
-	smart_str gbuf = {0}, hbuf = {0}, rbuf = {0};
+	remove_user_shutdown_function("asynclog_shutdown", sizeof("asynclog_shutdown") - 1);
+
+	smart_str hbuf = {0}, rbuf = {0};
 	zend_long i;
 
-	{
-		const int keys[] = {TRACK_VARS_POST, TRACK_VARS_GET, TRACK_VARS_COOKIE, TRACK_VARS_SERVER, TRACK_VARS_ENV, TRACK_VARS_FILES};
-		const char *vars[] = {"_POST", "_GET", "_COOKIE", "_SERVER", "_ENV", "_FILES"};
-		zval *var;
-		zval globals;
+	HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
+	const char *ctlname;
+	int status = 0;
+	zend_string *post_data_str = NULL;
 
-		array_init_size(&globals, 5);
-		for(i=0; i<sizeof(keys)/sizeof(const int); i++) {
-			var = &PG(http_globals)[keys[i]];
-			if(Z_TYPE_P(var) == IS_ARRAY && zend_hash_num_elements(Z_ARRVAL_P(var))) {
-				add_assoc_zval(&globals, vars[i], var);
-			}
-		}
+	if(!SG(request_info).request_uri) {
+		zval *prog, *argv, *argc, *arg0;
 
-		if(zend_hash_num_elements(Z_ARRVAL(globals)) == 0) {
-			zval_ptr_dtor(&globals);
+		status = EG(exit_status);
 
-			goto end;
-		} else if(php_json_encode(&gbuf, &globals, PHP_JSON_PRETTY_PRINT | PHP_JSON_UNESCAPED_UNICODE | PHP_JSON_UNESCAPED_SLASHES) == FAILURE) {
-			zval_ptr_dtor(&globals);
+		prog = zend_hash_str_find(_SERVER, "_", sizeof("_")-1);
+		argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
+		argc = zend_hash_str_find(_SERVER, "argc", sizeof("argc")-1);
 
-			switch(JSON_G(error_code)) {
-				case PHP_JSON_ERROR_NONE:
-					SYSLOG("GLOBALS: No error");
-					break;
-				case PHP_JSON_ERROR_DEPTH:
-					SYSLOG("GLOBALS: Maximum stack depth exceeded");
-					break;
-				case PHP_JSON_ERROR_STATE_MISMATCH:
-					SYSLOG("GLOBALS: State mismatch (invalid or malformed JSON)");
-					break;
-				case PHP_JSON_ERROR_CTRL_CHAR:
-					SYSLOG("GLOBALS: Control character error, possibly incorrectly encoded");
-					break;
-				case PHP_JSON_ERROR_SYNTAX:
-					SYSLOG("GLOBALS: Syntax error");
-					break;
-				case PHP_JSON_ERROR_UTF8:
-					SYSLOG("GLOBALS: Malformed UTF-8 characters, possibly incorrectly encoded");
-					break;
-				case PHP_JSON_ERROR_RECURSION:
-					SYSLOG("GLOBALS: Recursion detected");
-					break;
-				case PHP_JSON_ERROR_INF_OR_NAN:
-					SYSLOG("GLOBALS: Inf and NaN cannot be JSON encoded");
-					break;
-				case PHP_JSON_ERROR_UNSUPPORTED_TYPE:
-					SYSLOG("GLOBALS: Type is not supported");
-					break;
-				case PHP_JSON_ERROR_INVALID_PROPERTY_NAME:
-					SYSLOG("GLOBALS: The decoded property name is invalid");
-					break;
-				case PHP_JSON_ERROR_UTF16:
-					SYSLOG("GLOBALS: Single unpaired UTF-16 surrogate in unicode escape");
-					break;
-				default:
-					SYSLOG("GLOBALS: Unknown error");
-					break;
-			}
-
-			goto end;
-		} else if(gbuf.s) {
-			zval_ptr_dtor(&globals);
-			smart_str_0(&gbuf);
+		if(Z_LVAL_P(argc) == 0) {
+			smart_str_append_ex(&rbuf, Z_STR_P(prog), 0);
 		} else {
-			zval_ptr_dtor(&globals);
-			SYSLOG("GLOBALS: Is empty");
-			goto end;
+			arg0 = zend_hash_index_find(Z_ARRVAL_P(argv), 0);
+
+			if(strcmp(Z_STRVAL_P(prog), Z_STRVAL_P(arg0))) {
+				smart_str_append_ex(&rbuf, Z_STR_P(prog), 0);
+				smart_str_appendc_ex(&rbuf, ' ', 0);
+			}
+
+			smart_str_appendc_ex(&rbuf, '\'', 0);
+			smart_str_append_ex(&rbuf, Z_STR_P(arg0), 0);
+			smart_str_appendc_ex(&rbuf, '\'', 0);
+
+			for(i=1; i<Z_LVAL_P(argc); i++) {
+				zval *tmp = zend_hash_index_find(Z_ARRVAL_P(argv), i);
+				smart_str_appendc_ex(&rbuf, ' ', 0);
+				smart_str_appendc_ex(&rbuf, '\'', 0);
+				smart_str_append_ex(&rbuf, Z_STR_P(tmp), 0);
+				smart_str_appendc_ex(&rbuf, '\'', 0);
+			}
 		}
+
+		ctlname = "COMMAND";
+	} else {
+		zval *method, *scheme, *host, *url, *user_agent;
+
+		status = SG(sapi_headers).http_response_code;
+
+		zend_llist_apply_with_argument(&SG(sapi_headers).headers, php_head_apply_header_list_to_hash, &hbuf);
+
+		method = zend_hash_str_find(_SERVER, "REQUEST_METHOD", sizeof("REQUEST_METHOD")-1);
+		scheme = zend_hash_str_find(_SERVER, "REQUEST_SCHEME", sizeof("REQUEST_SCHEME")-1);
+		host = zend_hash_str_find(_SERVER, "HTTP_HOST", sizeof("HTTP_HOST")-1);
+		url = zend_hash_str_find(_SERVER, "REQUEST_URI", sizeof("REQUEST_URI")-1);
+		user_agent = zend_hash_str_find(_SERVER, "HTTP_USER_AGENT", sizeof("HTTP_USER_AGENT")-1);
+
+		smart_str_append_ex(&rbuf, Z_STR_P(method), 0);
+		smart_str_appendc_ex(&rbuf, ' ', 0);
+		smart_str_append_ex(&rbuf, Z_STR_P(scheme), 0);
+		smart_str_appendl_ex(&rbuf, "://", 3, 0);
+		smart_str_append_ex(&rbuf, Z_STR_P(host), 0);
+		smart_str_append_ex(&rbuf, Z_STR_P(url), 0);
+		if(user_agent) {
+			smart_str_appendl_ex(&rbuf, " \"", 2, 0);
+			smart_str_append_ex(&rbuf, Z_STR_P(user_agent), 0);
+			smart_str_appendc_ex(&rbuf, '"', 0);
+		} else {
+			smart_str_appendl_ex(&rbuf, " \"-\"", 4, 0);
+		}
+
+		ctlname = "REQUEST";
 	}
 
-	{
-		HashTable *_SERVER = Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]);
-		const char *ctlname;
-		int status = 0;
-		zend_string *post_data_str = NULL;
+	smart_str_0(&rbuf);
+	smart_str_0(&hbuf);
 
-		if(!SG(request_info).request_uri) {
-			zval *prog, *argv, *argc, *arg0;
-
-			status = EG(exit_status);
-
-			prog = zend_hash_str_find(_SERVER, "_", sizeof("_")-1);
-			argv = zend_hash_str_find(_SERVER, "argv", sizeof("argv")-1);
-			argc = zend_hash_str_find(_SERVER, "argc", sizeof("argc")-1);
-
-			if(Z_LVAL_P(argc) == 0) {
-				smart_str_append_ex(&rbuf, Z_STR_P(prog), 0);
-			} else {
-				arg0 = zend_hash_index_find(Z_ARRVAL_P(argv), 0);
-
-				if(strcmp(Z_STRVAL_P(prog), Z_STRVAL_P(arg0))) {
-					smart_str_append_ex(&rbuf, Z_STR_P(prog), 0);
-					smart_str_appendc_ex(&rbuf, ' ', 0);
-				}
-
-				smart_str_appendc_ex(&rbuf, '\'', 0);
-				smart_str_append_ex(&rbuf, Z_STR_P(arg0), 0);
-				smart_str_appendc_ex(&rbuf, '\'', 0);
-
-				for(i=1; i<Z_LVAL_P(argc); i++) {
-					zval *tmp = zend_hash_index_find(Z_ARRVAL_P(argv), i);
-					smart_str_appendc_ex(&rbuf, ' ', 0);
-					smart_str_appendc_ex(&rbuf, '\'', 0);
-					smart_str_append_ex(&rbuf, Z_STR_P(tmp), 0);
-					smart_str_appendc_ex(&rbuf, '\'', 0);
-				}
-			}
-
-			ctlname = "COMMAND";
-		} else {
-			zval *method, *scheme, *host, *url, *user_agent;
-
-			status = SG(sapi_headers).http_response_code;
-
-			zend_llist_apply_with_argument(&SG(sapi_headers).headers, php_head_apply_header_list_to_hash, &hbuf);
-
-			method = zend_hash_str_find(_SERVER, "REQUEST_METHOD", sizeof("REQUEST_METHOD")-1);
-			scheme = zend_hash_str_find(_SERVER, "REQUEST_SCHEME", sizeof("REQUEST_SCHEME")-1);
-			host = zend_hash_str_find(_SERVER, "HTTP_HOST", sizeof("HTTP_HOST")-1);
-			url = zend_hash_str_find(_SERVER, "REQUEST_URI", sizeof("REQUEST_URI")-1);
-			user_agent = zend_hash_str_find(_SERVER, "HTTP_USER_AGENT", sizeof("HTTP_USER_AGENT")-1);
-
-			smart_str_append_ex(&rbuf, Z_STR_P(method), 0);
-			smart_str_appendc_ex(&rbuf, ' ', 0);
-			smart_str_append_ex(&rbuf, Z_STR_P(scheme), 0);
-			smart_str_appendl_ex(&rbuf, "://", 3, 0);
-			smart_str_append_ex(&rbuf, Z_STR_P(host), 0);
-			smart_str_append_ex(&rbuf, Z_STR_P(url), 0);
-			if(user_agent) {
-				smart_str_appendl_ex(&rbuf, " \"", 2, 0);
-				smart_str_append_ex(&rbuf, Z_STR_P(user_agent), 0);
-				smart_str_appendc_ex(&rbuf, '"', 0);
-			} else {
-				smart_str_appendl_ex(&rbuf, " \"-\"", 4, 0);
-			}
-
-			ctlname = "REQUEST";
-		}
-
-		smart_str_0(&rbuf);
-		smart_str_0(&hbuf);
-
-		if(SG(request_info).request_body) {
-			php_stream_rewind(SG(request_info).request_body);
-			post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
-		}
+	if(SG(request_info).request_body) {
+		php_stream_rewind(SG(request_info).request_body);
+		post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
+	}
 
 #if ASYNCLOG_DEBUG
-		if(rbuf.s) {
-			SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
-		}
-		SYSLOG("STATUS: %d", status);
-		if(hbuf.s) {
-			SYSLOG("HEADERS: %s", ZSTR_VAL(hbuf.s) + strlen(PHP_EOL));
-		}
-		if(gbuf.s) {
-			SYSLOG("GLOBALS: %s", ZSTR_VAL(gbuf.s));
-		}
-		if(SG(request_info).content_length) {
-			SYSLOG("CONTENT_TYPE: %s", SG(request_info).content_type);
-			SYSLOG("CONTENT_LENGTH: %ld", SG(request_info).content_length);
-		}
-		if(post_data_str) {
-			SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
-		}
-		if(ASYNCLOG_G(output_len)) {
-			SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
-			SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
-		}
+	if(rbuf.s) {
+		SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
+	}
+	SYSLOG("STATUS: %d", status);
+	if(hbuf.s) {
+		SYSLOG("HEADERS: %s", ZSTR_VAL(hbuf.s) + strlen(PHP_EOL));
+	}
+	if(ASYNCLOG_G(globals).s) {
+		SYSLOG("GLOBALS: %s", ZSTR_VAL(ASYNCLOG_G(globals).s));
+	}
+	if(SG(request_info).content_length) {
+		SYSLOG("CONTENT_TYPE: %s", SG(request_info).content_type);
+		SYSLOG("CONTENT_LENGTH: %ld", SG(request_info).content_length);
+	}
+	if(post_data_str) {
+		SYSLOG("POST_DATA: %s", ZSTR_VAL(post_data_str));
+	}
+	if(ASYNCLOG_G(output_len)) {
+		SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
+		SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
+	}
 #endif
 
-		log_end_request(ctlname, rbuf.s, gbuf.s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s);
+	log_end_request(ctlname, rbuf.s, ASYNCLOG_G(globals).s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s, post_data_str);
 
-		if(post_data_str) {
-			zend_string_release_ex(post_data_str, 0);
-		}
+	if(post_data_str) {
+		zend_string_release_ex(post_data_str, 0);
 	}
 
-end:
+	smart_str_free(&ASYNCLOG_G(globals));
 	smart_str_free(&ASYNCLOG_G(output));
-	smart_str_free(&gbuf);
 	smart_str_free(&hbuf);
 	smart_str_free(&rbuf);
 
@@ -537,6 +548,7 @@ static int php_asynclog_post_deactivate(void) {
 
 const zend_function_entry asynclog_functions[] = {
 	PHP_FE(asynclog, arginfo_asynclog)
+	PHP_FE(asynclog_shutdown, arginfo_asynclog_shutdown)
 	PHP_FE_END
 };
 

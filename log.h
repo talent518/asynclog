@@ -9,7 +9,7 @@
 log_status_t log_init();
 log_status_t log_begin_request();
 log_status_t log_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration);
-log_status_t log_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output);
+log_status_t log_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output, const zend_string *post_data_str);
 void log_destroy();
 
 void log_lock();

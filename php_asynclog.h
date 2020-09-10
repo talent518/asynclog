@@ -64,6 +64,10 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 	zend_long max_output;
 	zend_long max_logs;
 
+	// globals buffer
+	smart_str globals;
+	zend_long globals_len;
+
 	// response buffer
 	smart_str output;
 	zend_long output_len;
