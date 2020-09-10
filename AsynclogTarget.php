@@ -71,7 +71,7 @@ class AsynclogTarget extends Target {
 			$data['traces'][] = sprintf('%s%s%s in %s:%d', $trace['class'], $trace['type'], $trace['function'], $trace['file'], $trace['line']);
 		}
 
-		asynclog('sing-agent', $category, $level, $message, $data, $data['timestamp'], $data['duration']??-1);
+		asynclog(\Yii::$app->id, $category, $level, $message, $data, $data['timestamp'], $data['duration']??-1);
 	}
 	
 	public function export() {
