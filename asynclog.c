@@ -16,6 +16,7 @@
 #include "standard/php_var.h"
 #include "json/php_json.h"
 #include "fastcgi.h"
+#include "php_variables.h"
 
 #include "api.h"
 #include "php_asynclog.h"
@@ -24,7 +25,6 @@
 ZEND_DECLARE_MODULE_GLOBALS(asynclog);
 
 PHP_INI_BEGIN()
-    STD_PHP_INI_ENTRY("asynclog.threads",                        "1", PHP_INI_SYSTEM, OnUpdateLong,   threads,    zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.type",                           "1", PHP_INI_SYSTEM, OnUpdateLong,   type,       zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.level",                         "31", PHP_INI_SYSTEM, OnUpdateLong,   level,      zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.filepath",      "/var/log/asynclog/", PHP_INI_SYSTEM, OnUpdateString, filepath,   zend_asynclog_globals, asynclog_globals)
@@ -32,8 +32,8 @@ PHP_INI_BEGIN()
     STD_PHP_INI_ENTRY("asynclog.redis_port",                  "6379", PHP_INI_SYSTEM, OnUpdateLong,   redis_port, zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.redis_auth",                      "", PHP_INI_SYSTEM, OnUpdateString, redis_auth, zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_SYSTEM, OnUpdateString, elastic,    zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.category",             "application", PHP_INI_SYSTEM, OnUpdateString, category,   zend_asynclog_globals, asynclog_globals)
-    STD_PHP_INI_ENTRY("asynclog.max_output",                     "0", PHP_INI_SYSTEM, OnUpdateString, max_output, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.max_output",               "1048576", PHP_INI_SYSTEM, OnUpdateString, max_output, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.max_logs",                   "10000", PHP_INI_SYSTEM, OnUpdateString, max_logs, zend_asynclog_globals, asynclog_globals)
 PHP_INI_END()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 5)
@@ -79,6 +79,132 @@ static void sig_handler(int sig) {
 
 	ASYNCLOG_G(is_shutdown) = 1;
 }
+
+#define JSON_POST_CONTENT_TYPE "application/json"
+
+static SAPI_POST_READER_FUNC(json_post_reader) {
+	SYSLOG("POST_READER");
+	if (!SG(request_info).request_body) {
+		sapi_read_standard_form_data();
+	}
+}
+
+static SAPI_POST_HANDLER_FUNC(json_post_handler) {
+	if(SG(request_info).request_body) {
+		php_stream_rewind(SG(request_info).request_body);
+		const zend_string *post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
+		if(post_data_str) {
+			SYSLOG("POST_HANDLER: %s", ZSTR_VAL(post_data_str));
+			zval_ptr_dtor_nogc(&PG(http_globals)[TRACK_VARS_POST]);
+			php_json_decode_ex(&PG(http_globals)[TRACK_VARS_POST], ZSTR_VAL(post_data_str), ZSTR_LEN(post_data_str), PHP_JSON_OBJECT_AS_ARRAY|PHP_JSON_THROW_ON_ERROR, PHP_JSON_PARSER_DEFAULT_DEPTH);
+			zend_string_release(post_data_str);
+		} else {
+			SYSLOG("POST_HANDLER");
+		}
+	} else {
+		SYSLOG("POST_HANDLER");
+	}
+}
+
+static const sapi_post_entry php_post_entries[] = {
+    { JSON_POST_CONTENT_TYPE, sizeof(JSON_POST_CONTENT_TYPE)-1, json_post_reader, json_post_handler },
+    { NULL, 0, NULL, NULL }
+};
+
+static void sapi_read_post_data(void) {
+    sapi_post_entry *post_entry;
+    uint32_t content_type_length = (uint32_t)strlen(SG(request_info).content_type);
+    char *content_type = estrndup(SG(request_info).content_type, content_type_length);
+    char *p;
+    char oldchar=0;
+    void (*post_reader_func)(void) = NULL;
+
+
+    /* dedicated implementation for increased performance:
+     * - Make the content type lowercase
+     * - Trim descriptive data, stay with the content-type only
+     */
+    for (p=content_type; p<content_type+content_type_length; p++) {
+        switch (*p) {
+            case ';':
+            case ',':
+            case ' ':
+                content_type_length = p-content_type;
+                oldchar = *p;
+                *p = 0;
+                break;
+            default:
+                *p = tolower(*p);
+                break;
+        }
+    }
+
+    /* now try to find an appropriate POST content handler */
+    if ((post_entry = zend_hash_str_find_ptr(&SG(known_post_content_types), content_type,
+            content_type_length)) != NULL) {
+        /* found one, register it for use */
+        SG(request_info).post_entry = post_entry;
+        post_reader_func = post_entry->post_reader;
+    } else {
+        /* fallback */
+        SG(request_info).post_entry = NULL;
+        if (!sapi_module.default_post_reader) {
+            /* no default reader ? */
+            SG(request_info).content_type_dup = NULL;
+            sapi_module.sapi_error(E_WARNING, "Unsupported content type:  '%s'", content_type);
+            return;
+        }
+    }
+    if (oldchar) {
+        *(p-1) = oldchar;
+    }
+
+    SG(request_info).content_type_dup = content_type;
+
+    if(post_reader_func) {
+        post_reader_func();
+    }
+
+    if(sapi_module.default_post_reader) {
+        sapi_module.default_post_reader();
+    }
+}
+
+static void (*old_treat_data)(int arg, char *str, zval *destArray);
+
+static SAPI_TREAT_DATA_FUNC(restful_treat_data) {
+	SYSLOG("POST_TREAT: %d, %s, %p", arg, str, destArray);
+
+	if(arg == PARSE_POST && !SG(request_info).request_body) {
+		sapi_read_post_data();
+	}
+
+	old_treat_data(arg, str, destArray);
+}
+
+static zend_bool php_auto_globals_create_post(zend_string *name)
+{
+	const char *method = SG(request_info).request_method;
+
+	SYSLOG("CREATE_POST1");
+
+    if (SG(request_info).content_length && method && PG(variables_order) && (strchr(PG(variables_order),'P') || strchr(PG(variables_order),'p')) && !SG(headers_sent) && SG(request_info).request_method && (!strcmp(method, "POST") || !strcmp(method, "PUT") || !strcmp(method, "PATCH") || !strcmp(method, "DELETE"))) {
+    	SYSLOG("CREATE_POST2");
+        sapi_module.treat_data(PARSE_POST, NULL, &PG(http_globals)[TRACK_VARS_POST]);
+    } else {
+    	SYSLOG("CREATE_POST3");
+        zval_ptr_dtor_nogc(&PG(http_globals)[TRACK_VARS_POST]);
+        array_init(&PG(http_globals)[TRACK_VARS_POST]);
+    }
+	SYSLOG("CREATE_POST4");
+
+    zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_POST]);
+    Z_ADDREF(PG(http_globals)[TRACK_VARS_POST]);
+	SYSLOG("CREATE_POST5");
+
+    return 0; /* don't rearm */
+}
+
 
 PHP_FUNCTION(asynclog) {
 	const char *name = NULL;
@@ -133,10 +259,6 @@ PHP_FUNCTION(asynclog) {
 			RETURN_FALSE;
 	}
 
-	if(!category) {
-		category = ASYNCLOG_G(category);
-	}
-
 	t = (itertime - ASYNCLOG_G(itertime)) * 1000;
 
 	ASYNCLOG_G(itertime) = itertime;
@@ -180,16 +302,16 @@ PHP_FUNCTION(asynclog) {
 		} else if (buf.s) {
 			smart_str_0(&buf);
 
-			SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
+			// SYSLOG("[%s][%s][%s] %.3fms %s %s", name, category, levelstr, t, message, ZSTR_VAL(buf.s));
 			log_push(name, category, levelstr, message, buf.s, timestamp, duration);
 
 			smart_str_free(&buf);
 		} else {
-			SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
+			// SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
 			log_push(name, category, levelstr, message, NULL, timestamp, duration);
 		}
 	} else {
-		SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
+		// SYSLOG("[%s][%s][%s] %.3fms %s", name, category, levelstr, t, message);
 		log_push(name, category, levelstr, message, NULL, timestamp, duration);
 	}
 
@@ -269,7 +391,6 @@ PHP_GINIT_FUNCTION(asynclog) {
 	asynclog_globals->reqtime    = 0;
 	asynclog_globals->restime    = 0;
 
-	asynclog_globals->threads    = 0;
 	asynclog_globals->type       = 0;
 	asynclog_globals->level      = 0;
 	asynclog_globals->filepath   = NULL;
@@ -311,11 +432,23 @@ PHP_MINIT_FUNCTION(asynclog) {
 
 	REGISTER_INI_ENTRIES();
 
+	sapi_register_default_post_reader(json_post_reader);
+	sapi_register_post_entries(php_post_entries);
+
+	old_treat_data = sapi_module.treat_data;
+	sapi_register_treat_data(restful_treat_data);
+
+	{
+		const zend_string *post = zend_string_init_interned("_POST", sizeof("_POST")-1, 1);
+		zend_hash_del(CG(auto_globals), post);
+		zend_register_auto_global(post, 0, php_auto_globals_create_post);
+	}
+
 	INILOG(MINIT);
 
-	if(strcmp(sapi_module.name, "fpm-fcgi")) {
-		log_init();
-	}
+//	if(sapi_module.phpinfo_as_text) {
+//		log_init();
+//	}
 
 	return SUCCESS;
 }
@@ -479,7 +612,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 		post_data_str = php_stream_copy_to_mem(SG(request_info).request_body, PHP_STREAM_COPY_ALL, 0);
 	}
 
-#if ASYNCLOG_DEBUG
+#if 0 // ASYNCLOG_DEBUG
 	if(rbuf.s) {
 		SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
 	}
@@ -500,6 +633,10 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	if(ASYNCLOG_G(output_len)) {
 		SYSLOG("OUTPUT_LEN: %ld", ASYNCLOG_G(output_len));
 		SYSLOG("OUTPUT: %s", ZSTR_VAL(ASYNCLOG_G(output).s));
+	}
+#else
+	if(rbuf.s) {
+		SYSLOG("%s: %s", ctlname, ZSTR_VAL(rbuf.s));
 	}
 #endif
 

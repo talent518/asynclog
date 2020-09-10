@@ -46,6 +46,8 @@ log_status_t log_file_write() {
 
 	snprintf(file, sizeof(file), "%s%s.log", filepath, p->name);
 
+	SYSLOG("FILEPATH: %s.log", file);
+
 	int fd = open(file, O_APPEND|O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
 
 	if(fd > 0) {
@@ -55,7 +57,8 @@ log_status_t log_file_write() {
 
 		close(fd);
 	} else {
-		SYSLOG("ERROR(%d): %s", errno, strerror(errno));
+		SYSLOG("Open file %s failure, errno is %d, strerror is %s\n", file, errno, strerror(errno));
+		fprintf(stderr, "Open file %s failure, errno is %d, strerror is %s\n", file, errno, strerror(errno));
 	}
 
 	free(p);

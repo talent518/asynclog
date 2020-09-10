@@ -25,7 +25,7 @@ static end_request_t end_request_handler = NULL;
 
 static pthread_t thread;
 static pthread_attr_t attr;
-static char stackaddr[8*1024*1024];
+// static char stackaddr[8*1024*1024];
 
 static void *log_write(void *arg) {
 	int n = 0;
@@ -33,7 +33,7 @@ static void *log_write(void *arg) {
 	sem_post(&dsem);
 	do {
 		sem_wait(&qsem);
-		SYSLOG("WORKER: %d", n);
+		SYSLOG("WORKER: %d", ++n);
 	} while(write_handler() == SUCCESS);
 	sem_post(&dsem);
 	SYSLOG("WORKER END");
@@ -109,7 +109,7 @@ log_status_t log_init() {
 
 	// create thread
 	pthread_attr_init(&attr);
-	pthread_attr_setstack(&attr, (void*)stackaddr, sizeof(stackaddr));
+//	pthread_attr_setstack(&attr, (void*)stackaddr, sizeof(stackaddr));
 	pthread_create(&thread, &attr, log_write, NULL);
 	sem_wait(&dsem);
 	SYSLOG("PTHREAD_CRAETED");
@@ -142,13 +142,13 @@ log_status_t log_begin_request() {
 }
 
 log_status_t log_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration) {
-	if(is_inited == 0 && log_init() == FAILURE || is_inited < 0) return FAILURE;
+	if((is_inited == 0 && log_init() == FAILURE) || is_inited < 0) return FAILURE;
 
 	return push_handler(name, category, level, message, data, timestamp, duration);
 }
 
 log_status_t log_end_request(const char *ctlname, const zend_string *request, const zend_string *globals, const char *content_type, zend_long content_length, int status, const zend_string *headers, const zend_string *output, const zend_string *post_data_str) {
-	if(is_inited == 0 && log_init() == FAILURE || is_inited < 0) return FAILURE;
+	if((is_inited == 0 && log_init() == FAILURE) || is_inited < 0) return FAILURE;
 
 	return end_request_handler(ctlname, request, globals, content_type, content_length, status, headers, output, post_data_str);
 }
