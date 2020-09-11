@@ -34,6 +34,8 @@ PHP_INI_BEGIN()
     STD_PHP_INI_ENTRY("asynclog.elastic",    "http://127.0.0.1:9200", PHP_INI_SYSTEM, OnUpdateString, elastic,    zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.max_output",               "1048576", PHP_INI_SYSTEM, OnUpdateString, max_output, zend_asynclog_globals, asynclog_globals)
     STD_PHP_INI_ENTRY("asynclog.max_logs",                   "10000", PHP_INI_SYSTEM, OnUpdateString, max_logs, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.ftok_path",      "/var/log/asynclog", PHP_INI_SYSTEM, OnUpdateString, ftok_path, zend_asynclog_globals, asynclog_globals)
+    STD_PHP_INI_ENTRY("asynclog.ftok_id",                       "87", PHP_INI_SYSTEM, OnUpdateLong,   ftok_id, zend_asynclog_globals, asynclog_globals)
 PHP_INI_END()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_asynclog, 0, 0, 5)

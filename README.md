@@ -31,4 +31,7 @@ asynclog.redis_port =                   6379
 asynclog.redis_auth =                     ""
 ; Elastic搜索引擎URL地址
 asynclog.elastic =   "http://127.0.0.1:9200"
+; shm共享统计数据使用的path和id
+asynclog.ftok_path =     "/var/log/asynclog"
+asynclog.ftok_id =       "/var/log/asynclog"
 ```

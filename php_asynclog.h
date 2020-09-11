@@ -1,6 +1,7 @@
 #ifndef PHP_ASYNCLOG_H
 #define PHP_ASYNCLOG_H
 
+#include "api.h"
 #include "php.h"
 
 extern zend_module_entry asynclog_module_entry;
@@ -37,7 +38,7 @@ extern zend_module_entry asynclog_module_entry;
 #	define OPENLOG()            openlog("asynclog", LOG_PID | LOG_CONS, LOG_USER)
 #	define SYSLOG(fmt, args...) syslog(LOG_DEBUG, "%s -> " fmt, sapi_module.name, ##args)
 #	define CLOSELOG()           closelog()
-#	define INILOG(fmt)          SYSLOG(#fmt " CONFIG: type: %ld, level: %ld, filepath: %s, redis_host: %s, redis_port: %ld, redis_auth: %s, elastic: %s", ASYNCLOG_G(type), ASYNCLOG_G(level), ASYNCLOG_G(filepath), ASYNCLOG_G(redis_host), ASYNCLOG_G(redis_port), ASYNCLOG_G(redis_auth), ASYNCLOG_G(elastic))
+#	define INILOG(fmt)          SYSLOG(#fmt " CONFIG: type: %ld, level: %ld, filepath: %s, redis_host: %s, redis_port: %ld, redis_auth: %s, elastic: %s, ftok_path: %s, ftok_id: %ld", ASYNCLOG_G(type), ASYNCLOG_G(level), ASYNCLOG_G(filepath), ASYNCLOG_G(redis_host), ASYNCLOG_G(redis_port), ASYNCLOG_G(redis_auth), ASYNCLOG_G(elastic), ASYNCLOG_G(ftok_path), ASYNCLOG_G(ftok_id))
 #else
 #	define OPENLOG()            ((void)0)
 #	define SYSLOG(fmt, args...) ((void)0)
@@ -61,6 +62,8 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 	char *elastic;
 	zend_long max_output;
 	zend_long max_logs;
+	char *ftok_path;
+	zend_long ftok_id;
 
 	// globals buffer
 	smart_str globals;

@@ -8,6 +8,15 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <time.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <string.h>
+
+typedef struct _shm_status_t {
+	sem_t sem;
+	unsigned long total;
+	unsigned long logs;
+} shm_status_t;
 
 typedef log_status_t (*handler_t)();
 typedef log_status_t (*push_handler_t)(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration);
@@ -25,7 +34,7 @@ static end_request_t end_request_handler = NULL;
 
 static pthread_t thread;
 static pthread_attr_t attr;
-// static char stackaddr[8*1024*1024];
+static shm_status_t *shm_status = NULL;
 
 static void *log_write(void *arg) {
 	int n = 0;
@@ -107,9 +116,20 @@ log_status_t log_init() {
 	sem_init(&lsem, 0, 1);
 	SYSLOG("MAX_LOGS: %u", value);
 
+	{
+		key_t key = ftok(ASYNCLOG_G(ftok_path), (int) ASYNCLOG_G(ftok_id));
+		int id = shmget(key, sizeof(shm_status_t), IPC_CREAT | SHM_R | SHM_W);
+		if(id < 0) {
+			SYSLOG("SHMGET(%d): %s", errno, strerror(errno));
+		} else {
+			shm_status = shmat(id, NULL, 0);
+			if(shm_status) sem_init(&shm_status->sem, 1, 1);
+			else SYSLOG("SHMAT(%d): %s", errno, strerror(errno));
+		}
+	}
+
 	// create thread
 	pthread_attr_init(&attr);
-//	pthread_attr_setstack(&attr, (void*)stackaddr, sizeof(stackaddr));
 	pthread_create(&thread, &attr, log_write, NULL);
 	sem_wait(&dsem);
 	SYSLOG("PTHREAD_CRAETED");
@@ -135,6 +155,32 @@ void log_mwait() {
 
 void log_mpost() {
 	sem_post(&msem);
+}
+
+void log_swait() {
+	if(shm_status) {
+		unsigned long total, logs;
+
+		sem_wait(&shm_status->sem);
+		total = shm_status->total;
+		logs = -- shm_status->logs;
+		sem_post(&shm_status->sem);
+
+		SYSLOG("SHM DECR: total(%lu), logs(%lu), micromtime(%lf)", total, logs, microtime());
+	}
+}
+
+void log_spost() {
+	if(shm_status) {
+		unsigned long total, logs;
+
+		sem_wait(&shm_status->sem);
+		total = ++ shm_status->total;
+		logs = ++ shm_status->logs;
+		sem_post(&shm_status->sem);
+
+		SYSLOG("SHM INCR: total(%lu), logs(%lu), microtime(%lf)", total, logs, microtime());
+	}
 }
 
 log_status_t log_begin_request() {
@@ -173,6 +219,15 @@ void log_destroy() {
 	sem_destroy(&lsem);
 
 	SYSLOG("LOG_DESTROY 2");
+
+	if(shm_status) {
+		if(shmdt(shm_status) < 0) {
+			SYSLOG("SHMDT(%d): %s", errno, strerror(errno));
+		}
+		sem_destroy(&shm_status->sem);
+	}
+
+	SYSLOG("LOG_DESTROY 3");
 
 	is_inited = 0;
 

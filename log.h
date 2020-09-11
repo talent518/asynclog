@@ -14,9 +14,13 @@ void log_destroy();
 
 void log_lock();
 void log_qpost();
+void log_unlock();
+
 void log_mwait();
 void log_mpost();
-void log_unlock();
+
+void log_swait();
+void log_spost();
 
 #define LOG_PUSH(p) \
 	do { \
@@ -28,6 +32,7 @@ void log_unlock();
 			tail->next = p; \
 			tail = p; \
 		} \
+		log_spost(); \
 		log_unlock(); \
 		log_qpost(); \
 		log_mwait(); \
@@ -42,6 +47,7 @@ void log_unlock();
 			if(p == tail) { \
 				tail = NULL; \
 			} \
+			log_swait(); \
 		} \
 		log_unlock(); \
 		log_mpost(); \
