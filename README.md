@@ -17,8 +17,6 @@ tailf /var/log/asynclog.log | sed 's|#012|\n|g'
 
 ### php.ini配置
 ```ini
-; 异步日志处理线程数
-asynclog.threads =                         1
 ; 日志存储方式: ASYNCLOG_MODE_FILE, ASYNCLOG_MODE_REDIS, ASYNCLOG_MODE_ELASTIC
 asynclog.mode =           ASYNCLOG_MODE_FILE
 ; 日志级别: ASYNCLOG_LEVEL_ALL = PHP_ASYNCLOG_LEVEL_ERROR | PHP_ASYNCLOG_LEVEL_WARN | PHP_ASYNCLOG_LEVEL_INFO | PHP_ASYNCLOG_LEVEL_DEBUG | PHP_ASYNCLOG_LEVEL_VERBOSE
@@ -33,6 +31,4 @@ asynclog.redis_port =                   6379
 asynclog.redis_auth =                     ""
 ; Elastic搜索引擎URL地址
 asynclog.elastic =   "http://127.0.0.1:9200"
-; 默认日志栏目
-asynclog.category =            "application"
 ```
