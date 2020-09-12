@@ -26,12 +26,21 @@ typedef struct _redis_t {
 	str_t *argv;
 } redis_t;
 
+typedef struct _multi_redis_t {
+	char buf[512];
+	char c;
+
+	int  argc;
+	str_t *argv;
+} multi_redis_t;
+
 redis_t *redis_init(redis_t *redis, int flag);
 
     int  redis_debug(redis_t *redis);
 
     int  redis_connect(redis_t *redis, const char *host, int port);
     int  redis_send(redis_t *redis, const char *format, ...);
+    int  redis_dgets(redis_t *redis);
     int  redis_recv(redis_t *redis, char flag);
     int  redis_senda(redis_t *redis, int argc, const char *argv[]);
 
@@ -44,6 +53,9 @@ redis_t *redis_init(redis_t *redis, int flag);
     int  redis_quit(redis_t *redis);
 
     int  redis_type(redis_t *redis, const char *type, char **rtype);
+    int  redis_get(redis_t *redis, const char *key, char **value);
+    int  redis_multi(redis_t *redis);
+    int  redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len);
 
    void  redis_clean(redis_t *redis);
     int  redis_close(redis_t *redis);

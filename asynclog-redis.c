@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "redis.h"
@@ -18,6 +19,7 @@ int main(int argc, const char *argv[]) {
 	char *rtype = NULL;
 	char rtype2[16];
 	char *rtype2ptr[] = {rtype2};
+	multi_redis_t *multi = NULL;
 
 	while((opt = getopt(argc, (char**) argv, "h:p:a:n:vd?")) != -1) {
 		switch(opt) {
@@ -78,11 +80,56 @@ int main(int argc, const char *argv[]) {
 	printf("************************************************************************************\n");
 	printf("TYPE(nofree): %s\n", rtype2);
 
+	size = 0;
+	if(!redis_multi(&redis)) goto end;
+	if(!redis_dbsize(&redis, NULL)) goto end;
+	if(!redis_keys(&redis, "*", NULL)) goto end;
+	if(!redis_type(&redis, "test", NULL)) goto end;
+	if(!redis_get(&redis, "test2", NULL)) goto end;
+	if(!redis_exec(&redis, &multi, &size)) goto end;
+	if(multi && size) {
+		printf("************************************************************************************\n");
+		for(i=0; i<size; i++) {
+			switch(multi[i].c) {
+				case '*':
+					for(opt=0; opt<multi[i].argc; opt++) {
+						printf("ARR[%d]: ", opt);
+						fwrite(multi[i].argv[opt].str, 1, multi[i].argv[opt].len, stdout);
+						printf("\n");
+						free(multi[i].argv[opt].str);
+					}
+					if(multi[i].argv) free(multi[i].argv);
+					break;
+				case '$':
+					printf("STRING: ");
+					if(multi[i].argc) {
+						fwrite(multi[i].argv[0].str, 1, multi[i].argv[0].len, stdout);
+						free(multi[i].argv[opt].str);
+					}
+					printf("\n");
+					if(multi[i].argv) free(multi[i].argv);
+					break;
+				default:
+					printf("STATUS: %s", multi[i].buf+1);
+			}
+		}
+	}
+
 	if(optind < argc) {
 		flag = redis.flag;
 		if(!redis_debug(&redis)) goto end;
-		if(!redis_senda(&redis, argc - optind, &argv[optind])) goto end;
-		if(!redis_recv(&redis, REDIS_FLAG_ANY)) goto end;
+		for(i=optind; i<argc; i++) {
+			opt = strcmp(argv[i], ";");
+			if(i+1 == argc || !opt) {
+				if(strcasecmp(argv[optind], "exec")) {
+					if(!redis_senda(&redis, i - optind + (!opt ? 0 : 1), &argv[optind])) goto end;
+					if(!redis_recv(&redis, REDIS_FLAG_ANY)) goto end;
+				} else {
+					if(!redis_exec(&redis, NULL, NULL)) goto end;
+				}
+				optind = i+1;
+			}
+		}
 		redis.flag = flag;
 	}
 

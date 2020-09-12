@@ -147,7 +147,7 @@ int redis_send(redis_t *redis, const char *format, ...) {
 		return REDIS_FALSE; \
 	}
 
-static int dgets(redis_t *redis) {
+int redis_dgets(redis_t *redis) {
 	register int n = 0, end = 0;
 	char *p = redis->buf;
 
@@ -165,6 +165,8 @@ static int dgets(redis_t *redis) {
 		fprintf(stderr, "UNCOMPLETE\n");
 	}
 
+	REDIS_DEBUG printf("< %s", redis->buf);
+
 	return REDIS_TRUE;
 }
 
@@ -178,10 +180,9 @@ int redis_recv(redis_t *redis, char flag) {
 	redis->c = '\0';
 
 	int ret, len, n = 1, i = 0;
-	char c = 0, c2, *p;
+	char c = 0, c2, buf[2];
 	for(; n > 0; n--) {
-		if(!dgets(redis)) return REDIS_FALSE;
-		REDIS_DEBUG printf("< %s", redis->buf);
+		if(!redis_dgets(redis)) return REDIS_FALSE;
 
 		c2 = redis->buf[0];
 
@@ -193,6 +194,7 @@ int redis_recv(redis_t *redis, char flag) {
 		switch(c2) {
 			case '*':
 				n = atoi(redis->buf + 1);
+				if(n <= 0) goto end;
 				len = sizeof(str_t) * n;
 				redis->argc = n;
 				redis->argv = (str_t*) malloc(len);
@@ -200,19 +202,24 @@ int redis_recv(redis_t *redis, char flag) {
 				n++;
 				break;
 			case '$':
+				len = atoi(redis->buf + 1);
+				REDIS_DEBUG printf("< ");
+				if(len <=0) {
+					if(redis->argc) {
+						redis->argv[i].len = 0;
+						redis->argv[i].str = NULL;
+					}
+					ret = recv(redis->fd, buf, 2, MSG_WAITALL);
+					ERRMSG_X(ret, "RECV");
+					REDIS_DEBUG printf("\n");
+					break;
+				}
 				if(redis->argc == 0) {
 					redis->argc = 1;
 					redis->argv = (str_t*) malloc(sizeof(str_t));
 				}
-				len = atoi(redis->buf + 1);
 				redis->argv[i].len = len;
 				redis->argv[i].str = (char*) malloc(sizeof(char)*len+2);
-				if(len > 0) {
-					REDIS_DEBUG printf("< ");
-				} else {
-					i++;
-					break;
-				}
 				ret = recv(redis->fd, redis->argv[i].str, len+2, MSG_WAITALL);
 				ERRMSG_X(ret, "RECV");
 				REDIS_DEBUG {
@@ -233,7 +240,7 @@ int redis_recv(redis_t *redis, char flag) {
 	}
 
 end:
-	return (flag == c || flag == '\0') ? REDIS_TRUE : REDIS_FALSE;
+	return (flag == c || flag == '\0' || c == '+') ? REDIS_TRUE : REDIS_FALSE;
 }
 
 int redis_senda(redis_t *redis, int argc, const char *argv[]) {
@@ -338,6 +345,55 @@ int redis_type(redis_t *redis, const char *type, char **rtype) {
 		memcpy(p, redis->buf + 1, n);
 		p[n] = '\0';
 	}
+	return REDIS_TRUE;
+}
+
+int redis_get(redis_t *redis, const char *key, char **value) {
+	if(!redis_send(redis, "ss", "GET", key)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	if(value) {
+		if(redis->argc) {
+			*value = redis->argv[0].str;
+			free(redis->argv);
+			redis->argc = 0;
+			redis->argv = NULL;
+		}
+	}
+	return REDIS_TRUE;
+}
+
+int  redis_multi(redis_t *redis) {
+	if(!redis_send(redis, "s", "MULTI")) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	return REDIS_TRUE;
+}
+
+int  redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
+	if(!redis_send(redis, "s", "EXEC")) return REDIS_FALSE;
+	if(!redis_dgets(redis)) return REDIS_FALSE;
+
+	if(redis->buf[0] == '*') {
+		int size = atoi(redis->buf + 1), opt;
+		multi_redis_t *p = NULL;
+		if(size <= 0) return REDIS_TRUE;
+		if(multi) {
+			*multi = p = (multi_redis_t *) malloc(sizeof(multi_redis_t) * size);
+			*multi_len = size;
+		}
+		for(opt=0; opt<size; opt++) {
+			if(!redis_recv(redis, REDIS_FLAG_ANY)) return REDIS_FALSE;
+			if(p) {
+				memcpy(p[opt].buf, redis->buf, sizeof(redis->buf));
+				p[opt].c = redis->c;
+				p[opt].argc = redis->argc;
+				p[opt].argv = redis->argv;
+
+				redis->argc = 0;
+				redis->argv = NULL;
+			}
+		}
+	}
+
 	return REDIS_TRUE;
 }
 
