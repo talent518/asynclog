@@ -13,7 +13,7 @@ typedef struct _redis_t {
 	int fd;
 	int flag;
 	char ip[32];
-	char buf[256];
+	char buf[512];
 } redis_t;
 
 redis_t *redis_init(redis_t *redis, int flag);

@@ -149,23 +149,16 @@ int redis_send(redis_t *redis, const char *format, ...) {
 static int dgets(redis_t *redis) {
 	register int n = 0, end = 0;
 	char *p = redis->buf;
-	redis->buf[sizeof(redis->buf)-1] = '\0';
-	do {
+
+	while(end != 2 && ++n < sizeof(redis->buf)) {
 		ERRMSG_X(recv(redis->fd, p, 1, MSG_WAITALL), "RECV");
 		if(*p == '\r') {
 			end = 1;
-			p++;
 		} else if(*p == '\n') {
 			end = 2;
-			if(*(p-1) == '\r') {
-				--p;
-			}
-			*p = '\0';
-			break;
-		} else {
-			p++;
 		}
-	} while(end != 2 && ++n < sizeof(redis->buf));
+		*(++p) = '\0';
+	}
 
 	if(end != 2) {
 		fprintf(stderr, "UNCOMPLETE\n");
@@ -183,7 +176,7 @@ int redis_recv(redis_t *redis, char flag) {
 	char c = 0, c2, *p;
 	for(; n > 0; n--) {
 		if(!dgets(redis)) return REDIS_FALSE;
-		REDIS_DEBUG printf("< %s\n", redis->buf);
+		REDIS_DEBUG printf("< %s", redis->buf);
 
 		c2 = redis->buf[0];
 
@@ -202,8 +195,7 @@ int redis_recv(redis_t *redis, char flag) {
 					ret = recv(redis->fd, redis->buf, len < sizeof(redis->buf) ? len : sizeof(redis->buf), MSG_WAITALL);
 					ERRMSG_X(ret, "RECV");
 					REDIS_DEBUG {
-						redis->buf[ret] = '\0';
-						printf("%s", redis->buf);
+						fwrite(redis->buf, 1, ret, stdout);
 					}
 					len -= ret;
 				}
