@@ -13,9 +13,11 @@ int main(int argc, const char *argv[]) {
 	int size = -1;
 	int opt;
 	int status = EXIT_SUCCESS;
-	int flag = 0;
+	int flag = 0, i;
+	char **keys = NULL;
+	char *rtype = NULL;
 
-	while((opt = getopt(argc, argv, "h:p:a:n:vd?")) != -1) {
+	while((opt = getopt(argc, (char**) argv, "h:p:a:n:vd?")) != -1) {
 		switch(opt) {
 			case 'h':
 				host = optarg;
@@ -51,14 +53,31 @@ int main(int argc, const char *argv[]) {
 	if(!redis_echo(&redis, "Hello World!!!")) goto end;
 	if(!redis_select(&redis, database)) goto end;
 	if(!redis_dbsize(&redis, &size)) goto end;
-	if(!redis_keys(&redis, "*", NULL)) goto end;
+	printf("************************************************************************************\n");
+	printf("DBSIZE: %d\n", size);
+	if(!redis_keys(&redis, "*", &keys)) goto end;
+	if(keys) {
+		printf("************************************************************************************\n");
+		for(i=0; keys[i]; i++) {
+			printf("KEYS(%d): %s\n", i+1, keys[i]);
+		}
+		free(keys);
+		keys = NULL;
+	}
 
-	if(!redis_type(&redis, "test")) goto end;
+	if(!redis_type(&redis, "test", &rtype)) goto end;
+	if(rtype) {
+		printf("************************************************************************************\n");
+		printf("TYPE: %s\n", rtype);
+		free(rtype);
+	}
 
 	if(optind < argc) {
+		flag = redis.flag;
 		if(!redis_debug(&redis)) goto end;
 		if(!redis_senda(&redis, argc - optind, &argv[optind])) goto end;
 		if(!redis_recv(&redis, REDIS_FLAG_ANY)) goto end;
+		redis.flag = flag;
 	}
 
 	if(!redis_quit(&redis)) goto end;

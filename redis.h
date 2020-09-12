@@ -33,16 +33,17 @@ redis_t *redis_init(redis_t *redis, int flag);
     int  redis_connect(redis_t *redis, const char *host, int port);
     int  redis_send(redis_t *redis, const char *format, ...);
     int  redis_recv(redis_t *redis, char flag);
-    int  redis_senda(redis_t *redis, int argc, char *argv[]);
+    int  redis_senda(redis_t *redis, int argc, const char *argv[]);
 
+    int  redis_auth(redis_t *redis, const char *password);
     int  redis_ping(redis_t *redis);
     int  redis_echo(redis_t *redis, const char *str);
     int  redis_select(redis_t *redis, int database);
     int  redis_dbsize(redis_t *redis, int *size);
-    int  redis_keys(redis_t *redis, const char *pattern, char **keys);
+    int  redis_keys(redis_t *redis, const char *pattern, char ***keys);
     int  redis_quit(redis_t *redis);
 
-    int  redis_type(redis_t *redis, const char *type);
+    int  redis_type(redis_t *redis, const char *type, char **rtype);
 
    void  redis_clean(redis_t *redis);
     int  redis_close(redis_t *redis);

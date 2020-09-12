@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #define REDIS_FLAG_OK    '+'
 #define REDIS_FLAG_ERR   '-'
@@ -82,7 +83,7 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 
 #define CASE(chr, c, fmt, type) \
 	case chr : { \
-		type x##c = va_arg(ap, type); \
+		type x##c = (type) va_arg(ap, type); \
 		n = snprintf(dbuf, sizeof(dbuf), fmt, x##c); \
 		SEND("$%d", n); \
 		SEND("%s", dbuf); \
@@ -96,7 +97,7 @@ int redis_send(redis_t *redis, const char *format, ...) {
 
 	va_list ap;
 	int ret, n;
-	char *p;
+	const char *p;
 	char *ptr, *buf = redis->buf;
 	char dbuf[32];
 
@@ -124,7 +125,7 @@ int redis_send(redis_t *redis, const char *format, ...) {
 			}
 			CASE('d', d, "%d", int)
 			CASE('D', D, "%ld", long int)
-			CASE('f', f, "%f", float)
+			CASE('f', f, "%lf", double)
 			CASE('F', F, "%lf", double)
 			CASE('u', u, "%u", unsigned int)
 			CASE('U', U, "%lu", unsigned long int)
@@ -235,7 +236,7 @@ end:
 	return (flag == c || flag == '\0') ? REDIS_TRUE : REDIS_FALSE;
 }
 
-int redis_senda(redis_t *redis, int argc, char *argv[]) {
+int redis_senda(redis_t *redis, int argc, const char *argv[]) {
 	int i, n;
 	char *buf = redis->buf;
 
@@ -281,12 +282,34 @@ int redis_select(redis_t *redis, int database) {
 int redis_dbsize(redis_t *redis, int *size) {
 	if(!redis_send(redis, "s", "DBSIZE")) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
+	if(size) {
+		*size = atoi(redis->buf+1);
+	}
 	return REDIS_TRUE;
 }
 
-int redis_keys(redis_t *redis, const char *pattern, char **keys) {
+int redis_keys(redis_t *redis, const char *pattern, char ***keys) {
 	if(!redis_send(redis, "ss", "KEYS", pattern)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_MULTI)) return REDIS_FALSE;
+	if(keys && redis->argc) {
+		int offset = sizeof(char*) * (redis->argc + 1);
+		int size = offset + redis->argc;
+		int i;
+		for(i=0; i<redis->argc; i++) {
+			size += redis->argv[i].len;
+		}
+
+		char **ptr = (char**) malloc(size);
+		char *p = (char*) ptr + offset;
+		for(i=0; i<redis->argc; i++) {
+			ptr[i] = p;
+			memcpy(p, redis->argv[i].str, redis->argv[i].len);
+			p += redis->argv[i].len + 1;
+			*(p-1) = '\0';
+		}
+		ptr[i] = NULL;
+		*keys = ptr;
+	}
 	return REDIS_TRUE;
 }
 
@@ -296,9 +319,25 @@ int redis_quit(redis_t *redis) {
 	return REDIS_TRUE;
 }
 
-int redis_type(redis_t *redis, const char *type) {
+int redis_type(redis_t *redis, const char *type, char **rtype) {
 	if(!redis_send(redis, "ss", "TYPE", type)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	if(rtype) {
+		char *p;
+		int n;
+
+		p = strchr(redis->buf, '\r');
+		if(!p) p = strchr(redis->buf, '\n');
+		if(!p) return REDIS_FALSE;
+		n = p - redis->buf - 1;
+
+		if(*rtype == NULL) {
+			*rtype = (char*) malloc(n + 1);
+		}
+		p = *rtype;
+		memcpy(p, redis->buf + 1, n);
+		p[n] = '\0';
+	}
 	return REDIS_TRUE;
 }
 
