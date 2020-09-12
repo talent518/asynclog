@@ -3,13 +3,11 @@
 
 #define REDIS_TRUE 1
 #define REDIS_FALSE 0
+#define REDIS_VERSION "0.1"
 
 #define REDIS_FLAG_FREE  1<<0
-#define REDIS_FLAG_OK    1<<1 // '+'
-#define REDIS_FLAG_ERR   1<<2 // '-'
-#define REDIS_FLAG_INT   1<<3 // ':'
-#define REDIS_FLAG_BULK  1<<4 // '$'
-#define REDIS_FLAG_MULTI 1<<5 // '*'
+#define REDIS_FLAG_DEBUG 1<<1
+#define REDIS_FLAG_ANY   0
 
 typedef struct _redis_t {
 	int fd;
@@ -19,9 +17,13 @@ typedef struct _redis_t {
 } redis_t;
 
 redis_t *redis_init(redis_t *redis, int flag);
+
+    int  redis_debug(redis_t *redis);
+
     int  redis_connect(redis_t *redis, const char *host, int port);
     int  redis_send(redis_t *redis, const char *format, ...);
-    int  redis_recv(redis_t *redis, int flag);
+    int  redis_recv(redis_t *redis, char flag);
+    int  redis_senda(redis_t *redis, int argc, char *argv[]);
 
     int  redis_ping(redis_t *redis);
     int  redis_echo(redis_t *redis, const char *str);

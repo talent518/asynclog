@@ -10,6 +10,12 @@
 #include <stdarg.h>
 #include <netdb.h>
 
+#define REDIS_FLAG_OK    '+'
+#define REDIS_FLAG_ERR   '-'
+#define REDIS_FLAG_INT   ':'
+#define REDIS_FLAG_BULK  '$'
+#define REDIS_FLAG_MULTI '*'
+
 #include "redis.h"
 
 #define ERRMSG(sock, msg) \
@@ -39,6 +45,14 @@ redis_t *redis_init(redis_t *redis, int flag) {
 	return redis;
 }
 
+int redis_debug(redis_t *redis) {
+	assert(redis);
+
+	redis->flag |= REDIS_FLAG_DEBUG;
+
+	return REDIS_TRUE;
+}
+
 int redis_connect(redis_t *redis, const char *host, int port) {
 	assert(redis->fd > 0);
 
@@ -58,9 +72,11 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 	ERRMSG(connect(redis->fd, (struct sockaddr *) &addr, sizeof(struct sockaddr_in)), "CONNECT");
 }
 
+#define REDIS_DEBUG if((redis->flag & REDIS_FLAG_DEBUG) != 0)
+
 #define SEND(fmt, args...) \
 	do { \
-		printf("> " fmt "\n", ##args); \
+		REDIS_DEBUG printf("> " fmt "\n", ##args); \
 		buf += sprintf(buf, fmt CRLF, ##args); \
 	} while(0)
 
@@ -76,7 +92,7 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 int redis_send(redis_t *redis, const char *format, ...) {
 	assert(redis->fd > 0);
 
-	printf("====================================================================================\n");
+	REDIS_DEBUG printf("====================================================================================\n");
 
 	va_list ap;
 	int ret, n;
@@ -124,21 +140,107 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	ERRMSG(send(redis->fd, redis->buf, buf-redis->buf, 0), "SEND");
 }
 
-int redis_recv(redis_t *redis, int flag) {
+#define ERRMSG_X(sock, msg) \
+	if((sock) <= 0) { \
+		perror(msg); \
+		return REDIS_FALSE; \
+	}
+
+static int dgets(redis_t *redis) {
+	register int n = 0, end = 0;
+	char *p = redis->buf;
+	redis->buf[sizeof(redis->buf)-1] = '\0';
+	do {
+		ERRMSG_X(recv(redis->fd, p, 1, MSG_WAITALL), "RECV");
+		if(*p == '\r') {
+			end = 1;
+			p++;
+		} else if(*p == '\n') {
+			end = 2;
+			if(*(p-1) == '\r') {
+				--p;
+			}
+			*p = '\0';
+			break;
+		} else {
+			p++;
+		}
+	} while(end != 2 && ++n < sizeof(redis->buf));
+
+	if(end != 2) {
+		fprintf(stderr, "UNCOMPLETE\n");
+	}
+
+	return REDIS_TRUE;
+}
+
+int redis_recv(redis_t *redis, char flag) {
 	assert(redis->fd > 0);
 
-	printf("------------------------------------------------------------------------------------\n");
+	REDIS_DEBUG printf("------------------------------------------------------------------------------------\n");
 
-	int ret = recv(redis->fd, redis->buf, sizeof(redis->buf), 0);
+	int ret, len, n = 1;
+	char c = 0, c2, *p;
+	for(; n > 0; n--) {
+		if(!dgets(redis)) return REDIS_FALSE;
+		REDIS_DEBUG printf("< %s\n", redis->buf);
 
-	if(ret > 0) {
-		printf("< ");
-		fwrite(redis->buf, 1, ret, stdout);
-		return REDIS_TRUE;
-	} else {
-		perror("RECV");
-		return REDIS_FALSE;
+		c2 = redis->buf[0];
+
+		if(!c) c = c2;
+
+		switch(c2) {
+			case '*':
+				n = atoi(redis->buf + 1) + 1;
+				break;
+			case '$':
+				len = atoi(redis->buf + 1) + 2;
+				if(len > 2) {
+					REDIS_DEBUG printf("< ");
+				}
+				while(len > 0) {
+					ret = recv(redis->fd, redis->buf, len < sizeof(redis->buf) ? len : sizeof(redis->buf), MSG_WAITALL);
+					ERRMSG_X(ret, "RECV");
+					REDIS_DEBUG {
+						redis->buf[ret] = '\0';
+						printf("%s", redis->buf);
+					}
+					len -= ret;
+				}
+				break;
+			case ':':
+			case '+':
+				goto end;
+			case '-':
+				goto end;
+				break;
+			default:
+				fprintf(stderr, "Unkown REDIS response data type '%c'\n", c);
+				return REDIS_FALSE;
+		}
 	}
+
+end:
+	return (flag == c || flag == '\0') ? REDIS_TRUE : REDIS_FALSE;
+}
+
+int redis_senda(redis_t *redis, int argc, char *argv[]) {
+	int i, n;
+	char *buf = redis->buf;
+
+	REDIS_DEBUG printf("====================================================================================\n");
+
+	SEND("*%d", argc);
+
+	for(i=0; i<argc; i++) {
+		n = strlen(argv[i]);
+		SEND("$%d", n);
+		SEND("%s", argv[i]);
+	}
+
+	SEND("");
+
+	ERRMSG(send(redis->fd, redis->buf, buf-redis->buf, 0), "SEND");
 }
 
 int redis_auth(redis_t *redis, const char *password) {
