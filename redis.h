@@ -9,11 +9,21 @@
 #define REDIS_FLAG_DEBUG 1<<1
 #define REDIS_FLAG_ANY   0
 
+typedef struct _str_t {
+	int len;
+	char *str;
+} str_t;
+
 typedef struct _redis_t {
 	int fd;
 	int flag;
 	char ip[32];
+
 	char buf[512];
+	char c;
+
+	int  argc;
+	str_t *argv;
 } redis_t;
 
 redis_t *redis_init(redis_t *redis, int flag);

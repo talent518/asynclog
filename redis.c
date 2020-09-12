@@ -172,7 +172,11 @@ int redis_recv(redis_t *redis, char flag) {
 
 	REDIS_DEBUG printf("------------------------------------------------------------------------------------\n");
 
-	int ret, len, n = 1;
+	redis_clean(redis);
+
+	redis->c = '\0';
+
+	int ret, len, n = 1, i = 0;
 	char c = 0, c2, *p;
 	for(; n > 0; n--) {
 		if(!dgets(redis)) return REDIS_FALSE;
@@ -180,25 +184,40 @@ int redis_recv(redis_t *redis, char flag) {
 
 		c2 = redis->buf[0];
 
-		if(!c) c = c2;
+		if(!c) {
+			c = c2;
+			redis->c = c2;
+		}
 
 		switch(c2) {
 			case '*':
-				n = atoi(redis->buf + 1) + 1;
+				n = atoi(redis->buf + 1);
+				len = sizeof(str_t) * n;
+				redis->argc = n;
+				redis->argv = (str_t*) malloc(len);
+				memset(redis->argv, 0, len);
+				n++;
 				break;
 			case '$':
-				len = atoi(redis->buf + 1) + 2;
-				if(len > 2) {
+				if(redis->argc == 0) {
+					redis->argc = 1;
+					redis->argv = (str_t*) malloc(sizeof(str_t));
+				}
+				len = atoi(redis->buf + 1);
+				redis->argv[i].len = len;
+				redis->argv[i].str = (char*) malloc(sizeof(char)*len+2);
+				if(len > 0) {
 					REDIS_DEBUG printf("< ");
+				} else {
+					i++;
+					break;
 				}
-				while(len > 0) {
-					ret = recv(redis->fd, redis->buf, len < sizeof(redis->buf) ? len : sizeof(redis->buf), MSG_WAITALL);
-					ERRMSG_X(ret, "RECV");
-					REDIS_DEBUG {
-						fwrite(redis->buf, 1, ret, stdout);
-					}
-					len -= ret;
+				ret = recv(redis->fd, redis->argv[i].str, len+2, MSG_WAITALL);
+				ERRMSG_X(ret, "RECV");
+				REDIS_DEBUG {
+					fwrite(redis->argv[i].str, 1, ret, stdout);
 				}
+				i++;
 				break;
 			case ':':
 			case '+':
@@ -284,6 +303,16 @@ int redis_type(redis_t *redis, const char *type) {
 }
 
 void redis_clean(redis_t *redis) {
+	if(redis->argc && redis->argv) {
+		int i;
+		for(i=0; i<redis->argc; i++) {
+			if(redis->argv[i].str) free(redis->argv[i].str);
+		}
+		free(redis->argv);
+
+		redis->argc = 0;
+		redis->argv = NULL;
+	}
 }
 
 int redis_close(redis_t *redis) {
