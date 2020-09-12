@@ -16,6 +16,8 @@ int main(int argc, const char *argv[]) {
 	int flag = 0, i;
 	char **keys = NULL;
 	char *rtype = NULL;
+	char rtype2[16];
+	char *rtype2ptr[] = {rtype2};
 
 	while((opt = getopt(argc, (char**) argv, "h:p:a:n:vd?")) != -1) {
 		switch(opt) {
@@ -71,6 +73,10 @@ int main(int argc, const char *argv[]) {
 		printf("TYPE: %s\n", rtype);
 		free(rtype);
 	}
+
+	if(!redis_type(&redis, "test", rtype2ptr)) goto end;
+	printf("************************************************************************************\n");
+	printf("TYPE(nofree): %s\n", rtype2);
 
 	if(optind < argc) {
 		flag = redis.flag;
