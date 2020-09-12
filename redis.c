@@ -203,15 +203,16 @@ int redis_recv(redis_t *redis, char flag) {
 				break;
 			case '$':
 				len = atoi(redis->buf + 1);
-				REDIS_DEBUG printf("< ");
 				if(len <=0) {
 					if(redis->argc) {
 						redis->argv[i].len = 0;
 						redis->argv[i].str = NULL;
 					}
-					ret = recv(redis->fd, buf, 2, MSG_WAITALL);
-					ERRMSG_X(ret, "RECV");
-					REDIS_DEBUG printf("\n");
+					if(len == 0) {
+						ret = recv(redis->fd, buf, 2, MSG_WAITALL);
+						ERRMSG_X(ret, "RECV");
+						REDIS_DEBUG printf("< \n");
+					}
 					break;
 				}
 				if(redis->argc == 0) {
@@ -221,6 +222,7 @@ int redis_recv(redis_t *redis, char flag) {
 				redis->argv[i].len = len;
 				redis->argv[i].str = (char*) malloc(sizeof(char)*len+2);
 				ret = recv(redis->fd, redis->argv[i].str, len+2, MSG_WAITALL);
+				REDIS_DEBUG printf("< ");
 				ERRMSG_X(ret, "RECV");
 				REDIS_DEBUG {
 					fwrite(redis->argv[i].str, 1, ret, stdout);
