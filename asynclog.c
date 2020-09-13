@@ -67,9 +67,6 @@ static void php_asynclog_output_handler(char *output, size_t output_len, char **
 		return;
 	}
 
-	// *handled_output = output;
-	// *handled_output_len = output_len;
-
 	ASYNCLOG_G(output_len) += output_len;
 	if(ASYNCLOG_G(max_output) <= 0 || smart_str_get_len(&ASYNCLOG_G(output)) + output_len < ASYNCLOG_G(max_output)) {
 		smart_str_appendl(&ASYNCLOG_G(output), output, output_len);
@@ -177,7 +174,7 @@ static void (*old_treat_data)(int arg, char *str, zval *destArray);
 static SAPI_TREAT_DATA_FUNC(restful_treat_data) {
 	SYSLOG("POST_TREAT: %d, %s, %p", arg, str, destArray);
 
-	if(arg == PARSE_POST && !SG(request_info).request_body) {
+	if(arg == PARSE_POST && !SG(request_info).request_body && SG(request_info).content_length) {
 		sapi_read_post_data();
 	}
 
@@ -330,7 +327,7 @@ PHP_FUNCTION(asynclog_shutdown) {
 		var = &PG(http_globals)[keys[i]];
 		// var = zend_hash_str_find(&EG(symbol_table), vars[i], strlen(vars[i]));
 		if(Z_TYPE_P(var) == IS_ARRAY && zend_hash_num_elements(Z_ARRVAL_P(var))) {
-			// Z_ADDREF_P(var);
+			 Z_ADDREF_P(var);
 			add_assoc_zval(&globals, vars[i], var);
 		}
 	}
@@ -493,6 +490,15 @@ PHP_RINIT_FUNCTION(asynclog) {
 		sapi_header_op(SAPI_HEADER_ADD, &ctr);
 	}
 #endif
+
+	if(SG(request_info).headers_only) {
+		sapi_header_line ctr = {0};
+
+		ctr.line_len = spprintf(&ctr.line, 0, "Content-Length: 0");
+		ctr.response_code = 0;
+
+		sapi_header_op(SAPI_HEADER_ADD, &ctr);
+	}
 
 	if(!ASYNCLOG_G(is_signal) && !strcmp(sapi_module.name, "fpm-fcgi")) {
 		zend_signal(SIGUSR1, sig_handler);
