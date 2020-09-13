@@ -186,11 +186,9 @@ static SAPI_TREAT_DATA_FUNC(restful_treat_data) {
 
 static zend_bool php_auto_globals_create_post(zend_string *name)
 {
-	const char *method = SG(request_info).request_method;
-
 	SYSLOG("CREATE_POST1");
 
-    if (SG(request_info).content_length && method && PG(variables_order) && (strchr(PG(variables_order),'P') || strchr(PG(variables_order),'p')) && !SG(headers_sent) && SG(request_info).request_method && (!strcmp(method, "POST") || !strcmp(method, "PUT") || !strcmp(method, "PATCH") || !strcmp(method, "DELETE"))) {
+    if (SG(request_info).content_length && !SG(headers_sent)) {
     	SYSLOG("CREATE_POST2");
         sapi_module.treat_data(PARSE_POST, NULL, &PG(http_globals)[TRACK_VARS_POST]);
     } else {
