@@ -99,7 +99,7 @@ static SAPI_POST_HANDLER_FUNC(json_post_handler) {
 			SYSLOG("POST_HANDLER: %s", ZSTR_VAL(post_data_str));
 			zval_ptr_dtor_nogc(&PG(http_globals)[TRACK_VARS_POST]);
 			php_json_decode_ex(&PG(http_globals)[TRACK_VARS_POST], ZSTR_VAL(post_data_str), ZSTR_LEN(post_data_str), PHP_JSON_OBJECT_AS_ARRAY|PHP_JSON_THROW_ON_ERROR, PHP_JSON_PARSER_DEFAULT_DEPTH);
-			zend_string_release(post_data_str);
+			zend_string_free(post_data_str);
 		} else {
 			SYSLOG("POST_HANDLER");
 		}
@@ -444,7 +444,7 @@ PHP_MINIT_FUNCTION(asynclog) {
 		const zend_string *post = zend_string_init("_POST", sizeof("_POST")-1, 0);
 		zend_hash_del(CG(auto_globals), post);
 		zend_register_auto_global(post, 0, php_auto_globals_create_post);
-		zend_string_release(post);
+		zend_string_free(post);
 	}
 
 	INILOG(MINIT);
@@ -646,7 +646,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 	log_end_request(ctlname, rbuf.s, ASYNCLOG_G(globals).s, SG(request_info).content_type, SG(request_info).content_length, status, hbuf.s, ASYNCLOG_G(output).s, post_data_str);
 
 	if(post_data_str) {
-		zend_string_release_ex(post_data_str, 0);
+		zend_string_free(post_data_str);
 	}
 
 	smart_str_free(&ASYNCLOG_G(globals));
