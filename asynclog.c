@@ -591,7 +591,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 		smart_str_append_ex(&rbuf, Z_STR_P(method), 0);
 		smart_str_appendc_ex(&rbuf, ' ', 0);
-		smart_str_append_ex(&rbuf, Z_STR_P(scheme), 0);
+		smart_str_append_ex(&rbuf, scheme ? Z_STR_P(scheme) : zend_string_init_interned("http", sizeof("http")-1, 1), 0);
 		smart_str_appendl_ex(&rbuf, "://", 3, 0);
 		smart_str_append_ex(&rbuf, Z_STR_P(host), 0);
 		smart_str_append_ex(&rbuf, Z_STR_P(url), 0);
