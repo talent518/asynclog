@@ -20,6 +20,10 @@ extern zend_module_entry asynclog_module_entry;
 #define PHP_ASYNCLOG_LEVEL_VERBOSE  (1<<4)
 #define PHP_ASYNCLOG_LEVEL_ALL (PHP_ASYNCLOG_LEVEL_ERROR | PHP_ASYNCLOG_LEVEL_WARN | PHP_ASYNCLOG_LEVEL_INFO | PHP_ASYNCLOG_LEVEL_DEBUG | PHP_ASYNCLOG_LEVEL_VERBOSE)
 
+#ifndef PHP_JSON_THROW_ON_ERROR
+#define PHP_JSON_THROW_ON_ERROR 0
+#endif
+
 #ifdef PHP_WIN32
 #	define PHP_ASYNCLOG_API __declspec(dllexport)
 #elif defined(__GNUC__) && __GNUC__ >= 4

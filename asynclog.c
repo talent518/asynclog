@@ -441,9 +441,10 @@ PHP_MINIT_FUNCTION(asynclog) {
 	sapi_register_treat_data(restful_treat_data);
 
 	{
-		const zend_string *post = zend_string_init_interned("_POST", sizeof("_POST")-1, 1);
+		const zend_string *post = zend_string_init("_POST", sizeof("_POST")-1, 0);
 		zend_hash_del(CG(auto_globals), post);
 		zend_register_auto_global(post, 0, php_auto_globals_create_post);
+		zend_string_release(post);
 	}
 
 	INILOG(MINIT);
@@ -591,7 +592,7 @@ PHP_RSHUTDOWN_FUNCTION(asynclog) {
 
 		smart_str_append_ex(&rbuf, Z_STR_P(method), 0);
 		smart_str_appendc_ex(&rbuf, ' ', 0);
-		smart_str_append_ex(&rbuf, scheme ? Z_STR_P(scheme) : zend_string_init_interned("http", sizeof("http")-1, 1), 0);
+		smart_str_append_ex(&rbuf, Z_STR_P(scheme), 0);
 		smart_str_appendl_ex(&rbuf, "://", 3, 0);
 		smart_str_append_ex(&rbuf, Z_STR_P(host), 0);
 		smart_str_append_ex(&rbuf, Z_STR_P(url), 0);
