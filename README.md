@@ -4,7 +4,7 @@ PHP异步日志收集
 ### syslog调试信息的输出
 ```sh
 # 编译asynclog扩展
-phpize && CFLAGS=-DASYNCLOG_DEBUG ./configure && make install
+phpize && ./configure --enable-debug && TESTS=-q make test install
 
 # rsyslog日志采集器配置
 echo ':programname,isequal,"asynclog" /var/log/asynclog.log' > /etc/rsyslog.d/20-asynclog.conf
