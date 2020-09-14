@@ -12,9 +12,9 @@ AC_DEFUN([PHP_SELECT_PROGRAM],[
   ifelse($2,,,[PHP_ADD_SOURCES_X([$ext_dir],[$2],[$3],PHP_[]translit($1,a-z0-9-,A-Z0-9_)[]_OBJS)])
 ])
 
-PHP_ARG_ENABLE(debug,    [whether to enable syslog debug support], [  --enable-debug              Enable syslog debug support], [no],  [no])
-PHP_ARG_ENABLE(asynclog, [whether to enable asynclog support],     [  --enable-asynclog           Enable asynclog support],     [yes], [no])
-PHP_ARG_ENABLE(redis,    [whether to enable redis support],        [  --disable-redis             Enable redis support],        [yes], [no])
+PHP_ARG_ENABLE(debug,    [whether to enable syslog debug support], [  --enable-debug              Enable syslog debug support], [no],  [yes])
+PHP_ARG_ENABLE(asynclog, [whether to enable asynclog support],     [  --enable-asynclog           Enable asynclog support],     [yes], [yes])
+PHP_ARG_ENABLE(redis,    [whether to enable redis support],        [  --disable-redis             Enable redis support],        [yes], [yes])
 
 if test "$PHP_DEBUG" != "no"; then
 	CFLAGS="$CFLAGS -DASYNCLOG_DEBUG"
