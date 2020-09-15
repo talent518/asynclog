@@ -222,9 +222,10 @@ int redis_recv(redis_t *redis, char flag) {
 				redis->argv[i].len = len;
 				redis->argv[i].str = (char*) malloc(sizeof(char)*len+2);
 				ret = recv(redis->fd, redis->argv[i].str, len+2, MSG_WAITALL);
-				REDIS_DEBUG printf("< ");
 				ERRMSG_X(ret, "RECV");
+				redis->argv[i].str[len] = '\0';
 				REDIS_DEBUG {
+					printf("< ");
 					fwrite(redis->argv[i].str, 1, ret, stdout);
 				}
 				i++;
@@ -350,9 +351,15 @@ int redis_type(redis_t *redis, const char *type, char **rtype) {
 	return REDIS_TRUE;
 }
 
+int redis_set(redis_t *redis, const char *key, const char *value) {
+	if(!redis_send(redis, "sss", "SET", key, value)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	return REDIS_TRUE;
+}
+
 int redis_get(redis_t *redis, const char *key, char **value) {
 	if(!redis_send(redis, "ss", "GET", key)) return REDIS_FALSE;
-	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
 	if(value) {
 		if(redis->argc) {
 			*value = redis->argv[0].str;

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "redis.h"
 
@@ -17,7 +18,7 @@ int main(int argc, const char *argv[]) {
 	int flag = 0, i;
 	char **keys = NULL;
 	char *rtype = NULL;
-	char rtype2[16];
+	char rtype2[32];
 	char *rtype2ptr[] = {rtype2};
 	multi_redis_t *multi = NULL;
 
@@ -67,6 +68,19 @@ int main(int argc, const char *argv[]) {
 		}
 		free(keys);
 		keys = NULL;
+	}
+
+	{
+		time_t t = time(NULL);
+		struct tm *tm = localtime(&t);
+		strftime(rtype2, sizeof(rtype2), "%F %T", tm);
+		if(!redis_set(&redis, "test", rtype2)) goto end;
+		if(!redis_get(&redis, "test", &rtype)) goto end;
+		printf("TIME: %s\n", rtype);
+		if(rtype) {
+			free(rtype);
+			rtype = NULL;
+		}
 	}
 
 	if(!redis_type(&redis, "test", &rtype)) goto end;
