@@ -76,8 +76,9 @@ int main(int argc, const char *argv[]) {
 		strftime(rtype2, sizeof(rtype2), "%F %T", tm);
 		if(!redis_set(&redis, "test", rtype2)) goto end;
 		if(!redis_get(&redis, "test", &rtype)) goto end;
-		printf("TIME: %s\n", rtype);
 		if(rtype) {
+			printf("************************************************************************************\n");
+			printf("TIME: %s\n", rtype);
 			free(rtype);
 			rtype = NULL;
 		}
@@ -127,6 +128,8 @@ int main(int argc, const char *argv[]) {
 					printf("STATUS: %s", multi[i].buf+1);
 			}
 		}
+		free(multi);
+		multi = NULL;
 	}
 
 	if(optind < argc) {
