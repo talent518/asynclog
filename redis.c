@@ -27,8 +27,6 @@
 		return REDIS_TRUE; \
 	}
 
-#define CRLF "\r\n"
-
 redis_t *redis_init(redis_t *redis, int flag) {
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
 	if(fd < 0) return NULL;
@@ -78,7 +76,7 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 #define SEND(fmt, args...) \
 	do { \
 		REDIS_DEBUG printf("> " fmt "\n", ##args); \
-		buf += sprintf(buf, fmt CRLF, ##args); \
+		buf += sprintf(buf, fmt "\r\n", ##args); \
 	} while(0)
 
 #define CASE(chr, c, fmt, type) \

@@ -12,7 +12,7 @@ AC_DEFUN([PHP_SELECT_PROGRAM],[
   ifelse($2,,,[PHP_ADD_SOURCES_X([$ext_dir],[$2],[$3],PHP_[]translit($1,a-z0-9-,A-Z0-9_)[]_OBJS)])
 ])
 
-PHP_ARG_ENABLE(debug,    [whether to enable syslog debug support], [  --enable-debug              Enable syslog debug support], [no])
+PHP_ARG_ENABLE(debug,    [whether to enable syslog debug support], [  --enable-debug              Enable syslog debug support], [no], [no])
 PHP_ARG_ENABLE(asynclog, [whether to enable asynclog support],     [  --enable-asynclog           Enable asynclog support])
 PHP_ARG_ENABLE(redis,    [whether to enable redis support],        [  --disable-redis             Enable redis support])
 
@@ -20,7 +20,7 @@ if test "$PHP_DEBUG" != "no"; then
 	CFLAGS="$CFLAGS -DASYNCLOG_DEBUG"
 fi
 
-dnl CFLAGS="$CFLAGS -Wno-discarded-qualifiers"
+CFLAGS="$CFLAGS -Wno-discarded-qualifiers -Wno-unused-result"
 
 PHP_EVAL_LIBLINE([-lm], LDFLAGS)
 PHP_ADD_SOURCES([$ext_dir], api.c redis.c, , global)
@@ -66,3 +66,6 @@ PHP_SUBST(install_targets)
 PHP_SUBST(PHP_BINARIES)
 PHP_SUBST(PHP_INSTALLED_SAPIS)
 
+PHP_SUBST(PHP_DEBUG)
+PHP_SUBST(PHP_ASYNCLOG)
+PHP_SUBST(PHP_REDIS)
