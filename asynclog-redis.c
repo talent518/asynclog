@@ -15,14 +15,14 @@ int main(int argc, const char *argv[]) {
 	int size = -1;
 	int opt;
 	int status = EXIT_SUCCESS;
-	int flag = 0, i;
+	int flag = 0, i, loop = 1;
 	char **keys = NULL;
 	char *rtype = NULL;
 	char rtype2[32];
 	char *rtype2ptr[] = {rtype2};
 	multi_redis_t *multi = NULL;
 
-	while((opt = getopt(argc, (char**) argv, "h:p:a:n:vd?")) != -1) {
+	while((opt = getopt(argc, (char**) argv, "h:p:a:n:l:vd?")) != -1) {
 		switch(opt) {
 			case 'h':
 				host = optarg;
@@ -36,6 +36,9 @@ int main(int argc, const char *argv[]) {
 			case 'n':
 				database = atoi(optarg);
 				break;
+			case 'l':
+				loop = atoi(optarg);
+				break;
 			case 'v':
 				printf("%s\n", REDIS_VERSION);
 				return EXIT_SUCCESS;
@@ -47,6 +50,7 @@ int main(int argc, const char *argv[]) {
 		}
 	}
 
+begin:
 	if(!redis_init(&redis, flag)) return EXIT_FAILURE;
 
 	printf("Connecting to %s:%d\n", host, port);
@@ -156,6 +160,8 @@ end:
 	redis_close(&redis);
 	redis_destory(&redis);
 
+	if((--loop) > 0) goto begin;
+
 	return 0;
 
 usage:
@@ -166,10 +172,11 @@ usage:
 		"        -p <port>            Server port (value: %d)\n"
 		"        -a <password>        Password to use when connecting to the server(value: %s)\n"
 		"        -n <database>        Database number(value: %d)\n"
+		"        -l <loop>            Loop times(value: %d)\n"
 		"        -d                   Open network debug info\n"
 		"        -v                   Output version and exit\n"
 		"        -?                   Output this help and exit\n"
-		, argv[0], host, port, auth, database);
+		, argv[0], host, port, auth, database, loop);
 
 	return status;
 }

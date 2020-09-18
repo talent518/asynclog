@@ -420,7 +420,11 @@ void redis_clean(redis_t *redis) {
 int redis_close(redis_t *redis) {
 	assert(redis->fd > 0);
 
-	ERRMSG(shutdown(redis->fd, SHUT_RDWR), "SHUTDOWN");
+	if(shutdown(redis->fd, SHUT_RDWR) < 0) {
+		perror("SHUTDOWN");
+		return REDIS_FALSE;
+	}
+
 	ERRMSG(close(redis->fd), "CLOSE");
 }
 
