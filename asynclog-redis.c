@@ -132,7 +132,7 @@ begin:
 					if(multi[i].argv) free(multi[i].argv);
 					break;
 				default:
-					printf("STATUS: %s", multi[i].buf+1);
+					printf("STATUS: %s\n", multi[i].buf);
 			}
 		}
 		free(multi);

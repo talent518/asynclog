@@ -79,8 +79,11 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 
 #define SEND(fmt, args...) \
 	do { \
-		ret = snprintf(redis->buf, sizeof(redis->buf), fmt, ##args); \
-		SENDL(redis->buf, ret); \
+		REDIS_DEBUG printf("> " fmt "\n", ##args); \
+		if(dprintf(redis->fd, fmt "\r\n", ##args) <= 0) { \
+			perror("DPRINTF"); \
+			goto end; \
+		} \
 	} while(0)
 
 #define SENDL(ptr, n) \
@@ -115,7 +118,7 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	REDIS_DEBUG printf("====================================================================================\n");
 
 	va_list ap;
-	int ret, n;
+	int n;
 	const char *p;
 	char *ptr, dbuf[32];
 
@@ -163,7 +166,7 @@ end:
 }
 
 int redis_senda(redis_t *redis, int argc, const char *argv[]) {
-	int i, n, ret;
+	int i, n;
 
 	REDIS_DEBUG printf("====================================================================================\n");
 
@@ -195,17 +198,20 @@ int redis_dgets(redis_t *redis) {
 		ERRMSG_X(recv(redis->fd, p, 1, MSG_WAITALL), "RECV");
 		if(*p == '\r') {
 			end = 1;
+			*p = '\0';
 		} else if(*p == '\n') {
 			end = 2;
+			*p = '\0';
+		} else {
+			*(++p) = '\0';
 		}
-		*(++p) = '\0';
 	}
 
 	if(end != 2) {
 		fprintf(stderr, "UNCOMPLETE\n");
 	}
 
-	REDIS_DEBUG printf("< %s", redis->buf);
+	REDIS_DEBUG printf("< %s\n", redis->buf);
 
 	return REDIS_TRUE;
 }
@@ -266,7 +272,8 @@ int redis_recv(redis_t *redis, char flag) {
 				redis->argv[i].str[len] = '\0';
 				REDIS_DEBUG {
 					printf("< ");
-					fwrite(redis->argv[i].str, 1, ret, stdout);
+					fwrite(redis->argv[i].str, 1, len, stdout);
+					printf("\n");
 				}
 				i++;
 				break;
@@ -355,12 +362,7 @@ int redis_type(redis_t *redis, const char *type, char **rtype) {
 	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
 	if(rtype) {
 		char *p;
-		int n;
-
-		p = strchr(redis->buf, '\r');
-		if(!p) p = strchr(redis->buf, '\n');
-		if(!p) return REDIS_FALSE;
-		n = p - redis->buf - 1;
+		int n = strlen(redis->buf + 1);
 
 		if(*rtype == NULL) {
 			*rtype = (char*) malloc(n + 1);
