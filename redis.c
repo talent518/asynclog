@@ -85,9 +85,9 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 #define CASE(chr, c, fmt, type) \
 	case chr : { \
 		type x##c = (type) va_arg(ap, type); \
-		n = snprintf(dbuf, sizeof(dbuf), fmt, x##c); \
+		n = snprintf(redis->buf, sizeof(redis->buf), fmt, x##c); \
 		SEND("$%d", n); \
-		SEND("%s", dbuf); \
+		SEND("%s", redis->buf); \
 		break; \
 	}
 
@@ -99,7 +99,7 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	va_list ap;
 	int ret, n;
 	const char *p;
-	char *ptr, dbuf[32];
+	char *ptr;
 
 	n = strlen(format);
 	SEND("*%d", n);
