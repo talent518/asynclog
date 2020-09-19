@@ -28,8 +28,12 @@
 	}
 
 redis_t *redis_init(redis_t *redis, int flag) {
+	int opt = 64*1024;
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
 	if(fd < 0) return NULL;
+
+	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (void*) &opt, sizeof(opt));
+	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (void*) &opt, sizeof(opt));
 
 	if(redis == NULL) {
 		redis = (redis_t*) malloc(sizeof(redis_t));
@@ -75,9 +79,23 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 
 #define SEND(fmt, args...) \
 	do { \
-		REDIS_DEBUG printf("> " fmt "\n", ##args); \
-		if(dprintf(redis->fd, fmt "\r\n", ##args) <= 0) { \
-			perror("DPRINTF"); \
+		ret = snprintf(redis->buf, sizeof(redis->buf), fmt, ##args); \
+		SENDL(redis->buf, ret); \
+	} while(0)
+
+#define SENDL(ptr, n) \
+	do { \
+		REDIS_DEBUG { \
+			printf("> "); \
+			fwrite(ptr, 1, n, stdout); \
+			printf("\n"); \
+		} \
+		if(n > 0 && send(redis->fd, ptr, n, MSG_WAITALL) <= 0) { \
+			perror("SEND"); \
+			goto end; \
+		} \
+		if(send(redis->fd, "\r\n", 2, MSG_WAITALL) <= 0) { \
+			perror("SEND"); \
 			goto end; \
 		} \
 	} while(0)
@@ -85,9 +103,9 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 #define CASE(chr, c, fmt, type) \
 	case chr : { \
 		type x##c = (type) va_arg(ap, type); \
-		n = snprintf(redis->buf, sizeof(redis->buf), fmt, x##c); \
+		n = snprintf(dbuf, sizeof(dbuf), fmt, x##c); \
 		SEND("$%d", n); \
-		SEND("%s", redis->buf); \
+		SENDL(dbuf, n); \
 		break; \
 	}
 
@@ -99,7 +117,7 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	va_list ap;
 	int ret, n;
 	const char *p;
-	char *ptr;
+	char *ptr, dbuf[32];
 
 	n = strlen(format);
 	SEND("*%d", n);
@@ -113,28 +131,14 @@ int redis_send(redis_t *redis, const char *format, ...) {
 				ptr = va_arg(ap, char*);
 				n = strlen(ptr);
 				SEND("$%d", n);
-				SEND("%s", ptr);
+				SENDL(ptr, n);
 				break;
 			}
 			case 'S': {
 				ptr = va_arg(ap, char*);
 				n = va_arg(ap, int);
 				SEND("$%d", n);
-				do {
-					REDIS_DEBUG {
-						printf("> ");
-						fwrite(ptr, 1, n, stdout);
-						printf("\n");
-					}
-					if(send(redis->fd, ptr, n, 0) <= 0) {
-						perror("SEND");
-						goto end;
-					}
-					if(send(redis->fd, "\r\n", 2, 0) <= 0) {
-						perror("SEND");
-						goto end;
-					}
-				} while(0);
+				SENDL(ptr, n);
 				break;
 			}
 			CASE('d', d, "%d", int)
@@ -150,8 +154,6 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	}
 	va_end(ap);
 
-	SEND("");
-
 	return REDIS_TRUE;
 
 end:
@@ -161,7 +163,7 @@ end:
 }
 
 int redis_senda(redis_t *redis, int argc, const char *argv[]) {
-	int i, n;
+	int i, n, ret;
 
 	REDIS_DEBUG printf("====================================================================================\n");
 
@@ -170,10 +172,8 @@ int redis_senda(redis_t *redis, int argc, const char *argv[]) {
 	for(i=0; i<argc; i++) {
 		n = strlen(argv[i]);
 		SEND("$%d", n);
-		SEND("%s", argv[i]);
+		SENDL(argv[i], n);
 	}
-
-	SEND("");
 
 	return REDIS_TRUE;
 

@@ -13,7 +13,7 @@ int main(int argc, const char *argv[]) {
 	int database = 0;
 	redis_t redis;
 	int size = -1;
-	int opt;
+	int opt, _optind;
 	int status = EXIT_SUCCESS;
 	int flag = 0, i, loop = 1;
 	char **keys = NULL;
@@ -50,7 +50,10 @@ int main(int argc, const char *argv[]) {
 		}
 	}
 
+	_optind = optind;
 begin:
+	optind = _optind;
+
 	if(!redis_init(&redis, flag)) return EXIT_FAILURE;
 
 	printf("Connecting to %s:%d\n", host, port);
