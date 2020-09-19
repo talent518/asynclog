@@ -19,7 +19,7 @@ typedef struct _redis_t {
 	int flag;
 	char ip[32];
 
-	char buf[512];
+	char buf[128];
 	char c;
 
 	int  argc;
@@ -27,7 +27,7 @@ typedef struct _redis_t {
 } redis_t;
 
 typedef struct _multi_redis_t {
-	char buf[512];
+	char buf[128];
 	char c;
 
 	int  argc;
