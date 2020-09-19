@@ -139,6 +139,25 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	ERRMSG(send(redis->fd, redis->buf, buf-redis->buf, 0), "SEND");
 }
 
+int redis_senda(redis_t *redis, int argc, const char *argv[]) {
+	int i, n;
+	char *buf = redis->buf;
+
+	REDIS_DEBUG printf("====================================================================================\n");
+
+	SEND("*%d", argc);
+
+	for(i=0; i<argc; i++) {
+		n = strlen(argv[i]);
+		SEND("$%d", n);
+		SEND("%s", argv[i]);
+	}
+
+	SEND("");
+
+	ERRMSG(send(redis->fd, redis->buf, buf-redis->buf, 0), "SEND");
+}
+
 #define ERRMSG_X(sock, msg) \
 	if((sock) <= 0) { \
 		perror(msg); \
@@ -242,25 +261,6 @@ int redis_recv(redis_t *redis, char flag) {
 
 end:
 	return (flag == c || flag == '\0' || c == '+') ? REDIS_TRUE : REDIS_FALSE;
-}
-
-int redis_senda(redis_t *redis, int argc, const char *argv[]) {
-	int i, n;
-	char *buf = redis->buf;
-
-	REDIS_DEBUG printf("====================================================================================\n");
-
-	SEND("*%d", argc);
-
-	for(i=0; i<argc; i++) {
-		n = strlen(argv[i]);
-		SEND("$%d", n);
-		SEND("%s", argv[i]);
-	}
-
-	SEND("");
-
-	ERRMSG(send(redis->fd, redis->buf, buf-redis->buf, 0), "SEND");
 }
 
 int redis_auth(redis_t *redis, const char *password) {
@@ -369,13 +369,13 @@ int redis_get(redis_t *redis, const char *key, char **value) {
 	return REDIS_TRUE;
 }
 
-int  redis_multi(redis_t *redis) {
+int redis_multi(redis_t *redis) {
 	if(!redis_send(redis, "s", "MULTI")) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
 	return REDIS_TRUE;
 }
 
-int  redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
+int redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
 	if(!redis_send(redis, "s", "EXEC")) return REDIS_FALSE;
 	if(!redis_dgets(redis)) return REDIS_FALSE;
 

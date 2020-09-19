@@ -39,10 +39,12 @@ redis_t *redis_init(redis_t *redis, int flag);
     int  redis_debug(redis_t *redis);
 
     int  redis_connect(redis_t *redis, const char *host, int port);
+
     int  redis_send(redis_t *redis, const char *format, ...);
+    int  redis_senda(redis_t *redis, int argc, const char *argv[]);
+
     int  redis_dgets(redis_t *redis);
     int  redis_recv(redis_t *redis, char flag);
-    int  redis_senda(redis_t *redis, int argc, const char *argv[]);
 
     int  redis_auth(redis_t *redis, const char *password);
     int  redis_ping(redis_t *redis);
