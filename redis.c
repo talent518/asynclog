@@ -188,6 +188,8 @@ int redis_send(redis_t *redis, const char *format, ...) {
 		buf = (char*) malloc(sizeof(char)*(size+1));
 	}
 
+	REDIS_DEBUG printf("> *%d\n", n);
+
 	va_start(ap, format);
 	sendbuf(redis, buf + sprintf(buf, "*%d\r\n", n), format, ap);
 	va_end(ap);
