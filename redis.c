@@ -473,6 +473,9 @@ int redis_multi(redis_t *redis) {
 
 int redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
 	if(!redis_send(redis, "s", "EXEC")) return REDIS_FALSE;
+
+	REDIS_DEBUG printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+
 	if(!redis_dgets(redis)) return REDIS_FALSE;
 
 	if(redis->buf[0] == '*') {
