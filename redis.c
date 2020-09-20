@@ -83,7 +83,7 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 		break; \
 	}
 
-static inline int sendsize(const char *p, va_list ap) {
+static int sendsize(const char *p, va_list ap) {
 	char *ptr, dbuf[32];
 	int size = 0, n;
 	while (*p) {
@@ -125,7 +125,7 @@ static inline int sendsize(const char *p, va_list ap) {
 		break; \
 	}
 
-static inline void sendbuf(redis_t *redis, char *buf, const char *p, va_list ap) {
+static void sendbuf(redis_t *redis, char *buf, const char *p, va_list ap) {
 	char *ptr, dbuf[32];
 	int n;
 	while (*p) {
