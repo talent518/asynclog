@@ -312,10 +312,16 @@ int redis_recv(redis_t *redis, char flag) {
 			case '*':
 				n = atoi(redis->buf + 1);
 				if(n <= 0) goto end;
-				len = sizeof(str_t) * n;
-				redis->argc = n;
-				redis->argv = (str_t*) malloc(len);
-				memset(redis->argv, 0, len);
+				if(redis->argc && redis->argv) {
+					redis->argc += n;
+					redis->argv = (str_t*) realloc(redis->argv, sizeof(str_t) * (n + redis->argc));
+					memset(&redis->argv[i], 0, sizeof(str_t) * n);
+				} else {
+					len = sizeof(str_t) * n;
+					redis->argc = n;
+					redis->argv = (str_t*) malloc(len);
+					memset(redis->argv, 0, len);
+				}
 				n++;
 				break;
 			case '$':
