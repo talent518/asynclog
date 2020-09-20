@@ -337,7 +337,7 @@ int redis_recv(redis_t *redis, char flag) {
 					redis->argv = (str_t*) malloc(sizeof(str_t));
 				}
 				redis->argv[i].len = len;
-				redis->argv[i].str = (char*) malloc(sizeof(char)*len+2);
+				redis->argv[i].str = (char*) malloc(sizeof(char)*(len+2));
 				ret = recv(redis->fd, redis->argv[i].str, len+2, MSG_WAITALL);
 				ERRMSG_X(ret, "RECV");
 				redis->argv[i].str[len] = '\0';
@@ -477,8 +477,8 @@ int redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
 
 	if(redis->buf[0] == '*') {
 		int size = atoi(redis->buf + 1), opt;
-		multi_redis_t *p = NULL;
 		if(size <= 0) return REDIS_TRUE;
+		multi_redis_t *p = NULL;
 		if(multi) {
 			*multi = p = (multi_redis_t *) malloc(sizeof(multi_redis_t) * size);
 			*multi_len = size;

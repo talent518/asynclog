@@ -116,17 +116,19 @@ begin:
 				case '*':
 					for(opt=0; opt<multi[i].argc; opt++) {
 						printf("ARR[%d]: ", opt);
-						fwrite(multi[i].argv[opt].str, 1, multi[i].argv[opt].len, stdout);
+						if(multi[i].argv[opt].str) {
+							fwrite(multi[i].argv[opt].str, 1, multi[i].argv[opt].len, stdout);
+							free(multi[i].argv[opt].str);
+						}
 						printf("\n");
-						free(multi[i].argv[opt].str);
 					}
 					if(multi[i].argv) free(multi[i].argv);
 					break;
 				case '$':
 					printf("STRING: ");
-					if(multi[i].argc) {
+					if(multi[i].argc && multi[i].argv[0].str) {
 						fwrite(multi[i].argv[0].str, 1, multi[i].argv[0].len, stdout);
-						free(multi[i].argv[opt].str);
+						free(multi[i].argv[0].str);
 					}
 					printf("\n");
 					if(multi[i].argv) free(multi[i].argv);
