@@ -57,8 +57,12 @@ redis_t *redis_init(redis_t *redis, int flag);
     int  redis_type(redis_t *redis, const char *type, char **rtype);
     int  redis_set(redis_t *redis, const char *key, const char *value);
     int  redis_get(redis_t *redis, const char *key, char **value);
+
+    int  redis_recv_multi(redis_t *redis, multi_redis_t **multi, int *multi_len);
+
     int  redis_multi(redis_t *redis);
     int  redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len);
+    int  redis_scan(redis_t *redis, int cursor, const char *match, int count, multi_redis_t **multi, int *multi_len);
 
    void  redis_clean(redis_t *redis);
     int  redis_close(redis_t *redis);

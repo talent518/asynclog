@@ -311,10 +311,13 @@ int redis_recv(redis_t *redis, char flag) {
 		switch(c2) {
 			case '*':
 				n = atoi(redis->buf + 1);
-				if(n <= 0) goto end;
+				if(n <= 0) {
+					redis->argc = i;
+					goto end;
+				}
 				if(redis->argc && redis->argv) {
-					redis->argc += n;
-					redis->argv = (str_t*) realloc(redis->argv, sizeof(str_t) * (n + redis->argc));
+					redis->argc = n + i;
+					redis->argv = (str_t*) realloc(redis->argv, sizeof(str_t) * redis->argc);
 					memset(&redis->argv[i], 0, sizeof(str_t) * n);
 				} else {
 					len = sizeof(str_t) * n;
@@ -471,15 +474,7 @@ int redis_get(redis_t *redis, const char *key, char **value) {
 	return REDIS_TRUE;
 }
 
-int redis_multi(redis_t *redis) {
-	if(!redis_send(redis, "s", "MULTI")) return REDIS_FALSE;
-	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
-	return REDIS_TRUE;
-}
-
-int redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
-	if(!redis_send(redis, "s", "EXEC")) return REDIS_FALSE;
-
+int redis_recv_multi(redis_t *redis, multi_redis_t **multi, int *multi_len) {
 	REDIS_DEBUG printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
 
 	if(!redis_dgets(redis)) return REDIS_FALSE;
@@ -507,6 +502,22 @@ int redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
 	}
 
 	return REDIS_TRUE;
+}
+
+int redis_multi(redis_t *redis) {
+	if(!redis_send(redis, "s", "MULTI")) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	return REDIS_TRUE;
+}
+
+int redis_exec(redis_t *redis, multi_redis_t **multi, int *multi_len) {
+	if(!redis_send(redis, "s", "EXEC")) return REDIS_FALSE;
+	return redis_recv_multi(redis, multi, multi_len);
+}
+
+int redis_scan(redis_t *redis, int cursor, const char *match, int count, multi_redis_t **multi, int *multi_len) {
+	if(!redis_send(redis, "sdsssd", "SCAN", cursor, "MATCH", match, "COUNT", count)) return REDIS_FALSE;
+	return redis_recv_multi(redis, multi, multi_len);
 }
 
 void redis_clean(redis_t *redis) {

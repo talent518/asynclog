@@ -6,6 +6,38 @@
 
 #include "redis.h"
 
+void print_multi(multi_redis_t *multi, int size) {
+	int i, opt;
+	printf("************************************************************************************\n");
+	for(i=0; i<size; i++) {
+		switch(multi[i].c) {
+			case '*':
+				for(opt=0; opt<multi[i].argc; opt++) {
+					printf("ARR[%d]: ", opt);
+					if(multi[i].argv[opt].str) {
+						fwrite(multi[i].argv[opt].str, 1, multi[i].argv[opt].len, stdout);
+						free(multi[i].argv[opt].str);
+					}
+					printf("\n");
+				}
+				if(multi[i].argv) free(multi[i].argv);
+				break;
+			case '$':
+				printf("STRING: ");
+				if(multi[i].argc && multi[i].argv[0].str) {
+					fwrite(multi[i].argv[0].str, 1, multi[i].argv[0].len, stdout);
+					free(multi[i].argv[0].str);
+				}
+				printf("\n");
+				if(multi[i].argv) free(multi[i].argv);
+				break;
+			default:
+				printf("STATUS: %s\n", multi[i].buf);
+		}
+	}
+	free(multi);
+}
+
 int main(int argc, const char *argv[]) {
 	const char *host = "127.0.0.1";
 	int port = 6379;
@@ -110,35 +142,16 @@ begin:
 	if(!redis_get(&redis, "test2", NULL)) goto end;
 	if(!redis_exec(&redis, &multi, &size)) goto end;
 	if(multi && size) {
-		printf("************************************************************************************\n");
-		for(i=0; i<size; i++) {
-			switch(multi[i].c) {
-				case '*':
-					for(opt=0; opt<multi[i].argc; opt++) {
-						printf("ARR[%d]: ", opt);
-						if(multi[i].argv[opt].str) {
-							fwrite(multi[i].argv[opt].str, 1, multi[i].argv[opt].len, stdout);
-							free(multi[i].argv[opt].str);
-						}
-						printf("\n");
-					}
-					if(multi[i].argv) free(multi[i].argv);
-					break;
-				case '$':
-					printf("STRING: ");
-					if(multi[i].argc && multi[i].argv[0].str) {
-						fwrite(multi[i].argv[0].str, 1, multi[i].argv[0].len, stdout);
-						free(multi[i].argv[0].str);
-					}
-					printf("\n");
-					if(multi[i].argv) free(multi[i].argv);
-					break;
-				default:
-					printf("STATUS: %s\n", multi[i].buf);
-			}
-		}
-		free(multi);
+		print_multi(multi, size);
 		multi = NULL;
+		size = 0;
+	}
+
+	if(!redis_scan(&redis, 0, "*", 10, &multi, &size)) goto end;
+	if(multi && size) {
+		print_multi(multi, size);
+		multi = NULL;
+		size = 0;
 	}
 
 	if(optind < argc) {
