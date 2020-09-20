@@ -184,7 +184,7 @@ end:
 
 usage:
 	fprintf(stderr,
-		"Usage: %s [options] [--] [cmd [arg [arg ...]]]\n"
+		"Usage: %s [options] [--] [cmd [arg [arg ...]]] [\\; cmd2 [arg2 [arg2...]]] ...\n"
 		"    options\n"
 		"        -h <host>            Server hostname (value: %s)\n"
 		"        -p <port>            Server port (value: %d)\n"
