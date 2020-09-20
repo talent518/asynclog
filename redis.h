@@ -5,8 +5,8 @@
 #define REDIS_FALSE 0
 #define REDIS_VERSION "0.1"
 
-#define REDIS_FLAG_FREE  1<<0
-#define REDIS_FLAG_DEBUG 1<<1
+#define REDIS_FLAG_FREE  (1<<0)
+#define REDIS_FLAG_DEBUG (1<<1)
 #define REDIS_FLAG_ANY   0
 
 typedef struct _str_t {

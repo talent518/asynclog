@@ -75,42 +75,95 @@ int redis_connect(redis_t *redis, const char *host, int port) {
 	ERRMSG(connect(redis->fd, (struct sockaddr *) &addr, sizeof(struct sockaddr_in)), "CONNECT");
 }
 
-#define REDIS_DEBUG if((redis->flag & REDIS_FLAG_DEBUG) != 0)
-
-#define SEND(fmt, args...) \
-	do { \
-		REDIS_DEBUG printf("> " fmt "\n", ##args); \
-		if(dprintf(redis->fd, fmt "\r\n", ##args) <= 0) { \
-			perror("DPRINTF"); \
-			goto end; \
-		} \
-	} while(0)
-
-#define SENDL(ptr, n) \
-	do { \
-		REDIS_DEBUG { \
-			printf("> "); \
-			fwrite(ptr, 1, n, stdout); \
-			printf("\n"); \
-		} \
-		if(n > 0 && send(redis->fd, ptr, n, MSG_WAITALL) <= 0) { \
-			perror("SEND"); \
-			goto end; \
-		} \
-		if(send(redis->fd, "\r\n", 2, MSG_WAITALL) <= 0) { \
-			perror("SEND"); \
-			goto end; \
-		} \
-	} while(0)
-
-#define CASE(chr, c, fmt, type) \
+#define CASESIZE(chr, c, fmt, type) \
 	case chr : { \
 		type x##c = (type) va_arg(ap, type); \
 		n = snprintf(dbuf, sizeof(dbuf), fmt, x##c); \
-		SEND("$%d", n); \
-		SENDL(dbuf, n); \
+		size += snprintf(NULL, 0, "$%d\r\n", n) + n + 2; \
 		break; \
 	}
+
+static inline int sendsize(const char *p, va_list ap) {
+	char *ptr, dbuf[32];
+	int size = 0, n;
+	while (*p) {
+		switch(*p) {
+			case 's': {
+				ptr = va_arg(ap, char*);
+				n = strlen(ptr);
+				size += snprintf(NULL, 0, "$%d\r\n%s\r\n", n, ptr);
+				break;
+			}
+			case 'S': {
+				ptr = va_arg(ap, char*);
+				n = va_arg(ap, int);
+				size += snprintf(NULL, 0, "$%d\r\n", n) + n + 2;
+				break;
+			}
+			CASESIZE('d', d, "%d", int)
+			CASESIZE('D', D, "%ld", long int)
+			CASESIZE('f', f, "%lf", double)
+			CASESIZE('F', F, "%lf", double)
+			CASESIZE('u', u, "%u", unsigned int)
+			CASESIZE('U', U, "%lu", unsigned long int)
+			default:
+				break;
+		}
+		p++;
+	}
+	return size;
+}
+
+#define REDIS_DEBUG if((redis->flag & REDIS_FLAG_DEBUG) != 0)
+
+#define CASEBUF(chr, c, fmt, type) \
+	case chr : { \
+		type x##c = (type) va_arg(ap, type); \
+		n = snprintf(dbuf, sizeof(dbuf), fmt, x##c); \
+		REDIS_DEBUG printf("> $%d\n> %s\n", n, dbuf); \
+		buf += sprintf(buf, "$%d\r\n%s\r\n", n, dbuf); \
+		break; \
+	}
+
+static inline void sendbuf(redis_t *redis, char *buf, const char *p, va_list ap) {
+	char *ptr, dbuf[32];
+	int n;
+	while (*p) {
+		switch(*p) {
+			case 's': {
+				ptr = va_arg(ap, char*);
+				n = strlen(ptr);
+				REDIS_DEBUG printf("> $%d\n> %s\n", n, ptr);
+				buf += sprintf(buf, "$%d\r\n%s\r\n", n, ptr);
+				break;
+			}
+			case 'S': {
+				ptr = va_arg(ap, char*);
+				n = va_arg(ap, int);
+				REDIS_DEBUG {
+					printf("> $%d\n> ", n);
+					fwrite(ptr, 1, n, stdout);
+					printf("\n");
+				}
+				buf += sprintf(buf, "$%d\r\n", n);
+				memcpy(buf, ptr, n);
+				buf += n;
+				memcpy(buf, "\r\n", 2);
+				buf += 2;
+				break;
+			}
+			CASEBUF('d', d, "%d", int)
+			CASEBUF('D', D, "%ld", long int)
+			CASEBUF('f', f, "%lf", double)
+			CASEBUF('F', F, "%lf", double)
+			CASEBUF('u', u, "%u", unsigned int)
+			CASEBUF('U', U, "%lu", unsigned long int)
+			default:
+				break;
+		}
+		p++;
+	}
+}
 
 int redis_send(redis_t *redis, const char *format, ...) {
 	assert(redis->fd > 0);
@@ -118,70 +171,86 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	REDIS_DEBUG printf("====================================================================================\n");
 
 	va_list ap;
-	int n;
-	const char *p;
-	char *ptr, dbuf[32];
+	int size, n;
+	char *buf;
 
 	n = strlen(format);
-	SEND("*%d", n);
 
-	p = format;
+	size = snprintf(NULL, 0, "*%d\r\n", n);
 
 	va_start(ap, format);
-	while (*p) {
-		switch(*p) {
-			case 's': {
-				ptr = va_arg(ap, char*);
-				n = strlen(ptr);
-				SEND("$%d", n);
-				SENDL(ptr, n);
-				break;
-			}
-			case 'S': {
-				ptr = va_arg(ap, char*);
-				n = va_arg(ap, int);
-				SEND("$%d", n);
-				SENDL(ptr, n);
-				break;
-			}
-			CASE('d', d, "%d", int)
-			CASE('D', D, "%ld", long int)
-			CASE('f', f, "%lf", double)
-			CASE('F', F, "%lf", double)
-			CASE('u', u, "%u", unsigned int)
-			CASE('U', U, "%lu", unsigned long int)
-			default:
-				break;
-		}
-		p++;
+	size += sendsize(format, ap);
+	va_end(ap);
+
+	if(size < sizeof(redis->buf)) {
+		buf = redis->buf;
+	} else {
+		buf = (char*) malloc(sizeof(char)*(size+1));
 	}
+
+	va_start(ap, format);
+	sendbuf(redis, buf + sprintf(buf, "*%d\r\n", n), format, ap);
 	va_end(ap);
 
-	return REDIS_TRUE;
-
-end:
-	va_end(ap);
-
-	return REDIS_FALSE;
+	if(send(redis->fd, buf, size, MSG_WAITALL) <= 0) {
+		perror("SEND");
+		if(buf != redis->buf) {
+			free(buf);
+		}
+		return REDIS_FALSE;
+	} else {
+		if(buf != redis->buf) {
+			free(buf);
+		}
+		return REDIS_TRUE;
+	}
 }
 
 int redis_senda(redis_t *redis, int argc, const char *argv[]) {
-	int i, n;
+	int i, n, size, *sizes;
+	char *ptr, *pptr = NULL;
 
 	REDIS_DEBUG printf("====================================================================================\n");
 
-	SEND("*%d", argc);
+	size = snprintf(NULL, 0, "*%d\r\n", argc);
+	sizes = (int*) malloc(sizeof(int) * argc);
 
 	for(i=0; i<argc; i++) {
 		n = strlen(argv[i]);
-		SEND("$%d", n);
-		SENDL(argv[i], n);
+		sizes[i] = n;
+		size += snprintf(NULL, 0, "$%d\r\n", n) + n + 2;
 	}
 
-	return REDIS_TRUE;
+	if(size < sizeof(redis->buf)) {
+		ptr = redis->buf;
+	} else {
+		ptr = (char*) malloc(sizeof(char)*(size+1));
+	}
 
-end:
-	return REDIS_FALSE;
+	pptr = ptr;
+
+	REDIS_DEBUG printf("> *%d\n", argc);
+	ptr += sprintf(ptr, "*%d\r\n", argc);
+
+	for(i=0; i<argc; i++) {
+		REDIS_DEBUG printf("> $%d\n> %s\n", sizes[i], argv[i]);
+		ptr += sprintf(ptr, "$%d\r\n%s\r\n", sizes[i], argv[i]);
+	}
+
+	free(sizes);
+
+	if(send(redis->fd, pptr, size, MSG_WAITALL) <= 0) {
+		perror("SEND");
+		if(pptr != redis->buf) {
+			free(pptr);
+		}
+		return REDIS_FALSE;
+	} else {
+		if(pptr != redis->buf) {
+			free(pptr);
+		}
+		return REDIS_TRUE;
+	}
 }
 
 #define ERRMSG_X(sock, msg) \
