@@ -1,6 +1,8 @@
 #ifndef _REDIS_H
 #define _REDIS_H
 
+#include <stdio.h>
+
 #define REDIS_TRUE 1
 #define REDIS_FALSE 0
 #define REDIS_VERSION "0.1"
@@ -16,18 +18,19 @@ typedef struct _str_t {
 
 typedef struct _redis_t {
 	int fd;
+	FILE *fp;
 	int flag;
 	char ip[32];
 
-	char buf[128];
+	char buf[256];
 	char c;
 
-	int  argc;
+	int   argc;
 	str_t *argv;
 } redis_t;
 
 typedef struct _multi_redis_t {
-	char buf[128];
+	char buf[256];
 	char c;
 
 	int  argc;
