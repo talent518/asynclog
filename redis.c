@@ -423,6 +423,37 @@ void _redis_clean(redis_data_t *data) {
 	memset(data, 0, sizeof(redis_data_t));
 }
 
+int redis_index_int(redis_t *redis, const char *key, int index, long int *value) {
+	if(!redis_send(redis, "ssd", "lindex", key, index)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
+
+	if(redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
+	else *value = 0;
+
+	return REDIS_TRUE;
+}
+
+int redis_last_int(redis_t *redis, const char *key, long int *value) {
+	return redis_index_int(redis, key, -1, value);
+}
+
+int redis_rpush_int(redis_t *redis, const char *key, long int value) {
+	if(!redis_send(redis, "ssD", "rpush", key, value)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
+
+	return REDIS_TRUE;
+}
+
+int redis_lpop_int(redis_t *redis, const char *key, long int *value) {
+	if(!redis_send(redis, "ss", "lpop", key)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
+
+	if(redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
+	else *value = 0;
+
+	return REDIS_TRUE;
+}
+
 int redis_close(redis_t *redis) {
 	redis_clean(redis);
 

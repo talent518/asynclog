@@ -71,6 +71,11 @@ redis_t *redis_init(redis_t *redis, int flag);
     int  redis_exec(redis_t *redis);
     int  redis_scan(redis_t *redis, int cursor, const char *match, int count);
 
+    int redis_index_int(redis_t *redis, const char *key, int index, long int *value);
+    int redis_last_int(redis_t *redis, const char *key, long int *value);
+    int redis_rpush_int(redis_t *redis, const char *key, long int value);
+    int redis_lpop_int(redis_t *redis, const char *key, long int *value);
+
    void  _redis_clean(redis_data_t *data);
 #define  redis_clean(redis)                  _redis_clean(&(redis)->data)
     int  redis_close(redis_t *redis);
