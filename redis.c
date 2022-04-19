@@ -347,8 +347,10 @@ int redis_del(redis_t *redis, const char *key, int *exists) {
 }
 
 int redis_del_keys(redis_t *redis, const char *pattern, int *exists) {
-	int ret = REDIS_FALSE, k;
+	int ret = REDIS_FALSE, k = 0;
 	char **keys = NULL;
+
+	if(exists) *exists = 0;
 
 	if(!redis_keys(redis, pattern, &keys)) goto end;
 	
@@ -480,6 +482,34 @@ int redis_lpop_int(redis_t *redis, const char *key, long int *value) {
 	else *value = 0;
 
 	return REDIS_TRUE;
+}
+
+int redis_lrem_int(redis_t *redis, const char *key, int count, long int value) {
+	if(!redis_send(redis, "ssdD", "lrem", key, count, value)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
+
+	return REDIS_TRUE;
+}
+
+int redis_lrem_keys(redis_t *redis, const char *pattern, long int value, int *exists) {
+	int ret = REDIS_FALSE, k;
+	char **keys = NULL;
+
+	if(!redis_keys(redis, pattern, &keys)) goto end;
+	
+	if(keys) {
+		for(k=0; keys[k]; k++) {
+			if(!redis_lrem_int(redis, keys[k], 0, value)) goto end;
+			if(exists && redis->data.c == REDIS_FLAG_INT) *exists += redis->data.l;
+		}
+	}
+
+	ret = REDIS_TRUE;
+
+end:
+	if(keys) free(keys);
+
+	return ret;
 }
 
 int redis_close(redis_t *redis) {
