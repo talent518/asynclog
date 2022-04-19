@@ -185,10 +185,10 @@ int redis_dgets(redis_t *redis) {
 	return REDIS_TRUE;
 }
 
-static int _redis_recv(redis_t *redis, char flag, redis_data_t *data) {
+static int _redis_recv(redis_t *redis, redis_data_t *data) {
 	int i;
 	switch(data->c) {
-		case '*':
+		case REDIS_FLAG_MULTI:
 			data->sz = atoi(redis->buf + 1);
 			if(data->sz <= 0) return REDIS_TRUE;
 			data->data = (redis_data_t*) malloc(sizeof(redis_data_t)*data->sz);
@@ -196,12 +196,12 @@ static int _redis_recv(redis_t *redis, char flag, redis_data_t *data) {
 			for(i=0; i<data->sz; i++) {
 				if(!redis_dgets(redis)) return REDIS_FALSE;
 				data->data[i].c = redis->buf[0];
-				if(!_redis_recv(redis, redis->flag, &data->data[i])) {
+				if(!_redis_recv(redis, &data->data[i])) {
 					break;
 				}
 			}
 			break;
-		case '$':
+		case REDIS_FLAG_BULK:
 			data->sz = atoi(redis->buf + 1);
 			if(data->sz >= 0) {
 				data->str = (char*) malloc(data->sz+2);
@@ -226,20 +226,20 @@ static int _redis_recv(redis_t *redis, char flag, redis_data_t *data) {
 				}
 			}
 			break;
-		case ':':
+		case REDIS_FLAG_INT:
 			data->l = strtol(redis->buf + 1, NULL, 10);
 			break;
-		case '-':
+		case REDIS_FLAG_ERR:
 			data->str = strdup(redis->buf + 5);
 			data->sz = strlen(data->str);
 			break;
-		case '+':
+		case REDIS_FLAG_OK:
 			data->str = strdup(redis->buf + 1);
 			data->sz = strlen(data->str);
 			break;
 		default:
 			printf("===%x===\n", data->c);
-			break;
+			return REDIS_FALSE;
 	}
 	return REDIS_TRUE;
 }
@@ -255,9 +255,9 @@ int redis_recv(redis_t *redis, char flag) {
 	if(!redis_dgets(redis)) return REDIS_FALSE;
 
 	redis->data.c = redis->buf[0];
-	if(!_redis_recv(redis, flag, &redis->data)) return REDIS_FALSE;
+	if(!_redis_recv(redis, &redis->data)) return REDIS_FALSE;
 
-	return (flag == redis->data.c || flag == '\0' || redis->data.c == '+') ? REDIS_TRUE : REDIS_FALSE;
+	return (flag == redis->data.c || flag == REDIS_FLAG_ANY || redis->data.c == REDIS_FLAG_OK) ? REDIS_TRUE : REDIS_FALSE;
 }
 
 int redis_auth(redis_t *redis, const char *password) {
@@ -287,14 +287,14 @@ int redis_select(redis_t *redis, int database) {
 int redis_dbsize(redis_t *redis, long int *size) {
 	if(!redis_send(redis, "s", "DBSIZE")) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
-	if(size) *size = redis->data.l;
+	if(size) *size = (redis->data.c == REDIS_FLAG_INT ? redis->data.l : 0);
 	return REDIS_TRUE;
 }
 
 int redis_keys(redis_t *redis, const char *pattern, char ***keys) {
 	if(!redis_send(redis, "ss", "KEYS", pattern)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_MULTI)) return REDIS_FALSE;
-	if(keys && redis->data.sz > 0) {
+	if(keys && redis->data.c == REDIS_FLAG_MULTI && redis->data.sz > 0) {
 		int offset = sizeof(char*) * (redis->data.sz + 1);
 		int size = offset + redis->data.sz;
 		int i;
@@ -324,8 +324,8 @@ int redis_quit(redis_t *redis) {
 
 int redis_type(redis_t *redis, const char *key, char **rtype) {
 	if(!redis_send(redis, "ss", "TYPE", key)) return REDIS_FALSE;
-	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
-	if(rtype) {
+	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
+	if(rtype && redis->data.c == REDIS_FLAG_BULK) {
 		char *p;
 		int n = strlen(redis->buf + 1);
 
@@ -342,8 +342,36 @@ int redis_type(redis_t *redis, const char *key, char **rtype) {
 int redis_del(redis_t *redis, const char *key, int *exists) {
 	if(!redis_send(redis, "ss", "DEL", key)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
-	if(exists) *exists = redis->data.l;
+	if(exists) *exists = (redis->data.c == REDIS_FLAG_INT ? redis->data.l : 0);
 	return REDIS_TRUE;
+}
+
+int redis_del_keys(redis_t *redis, const char *pattern, int *exists) {
+	int ret = REDIS_FALSE, k;
+	char **keys = NULL;
+
+	if(!redis_keys(redis, pattern, &keys)) goto end;
+	
+	if(keys) {
+		for(k=0; keys[k]; k++);
+
+		if(k > 0) {
+			keys[k] = keys[0];
+			keys[0] = "del";
+
+			if(!redis_senda(redis, k+1, (const char **) keys)) goto end;
+			if(!redis_recv(redis, REDIS_FLAG_INT)) goto end;
+
+			if(exists) *exists = (redis->data.c == REDIS_FLAG_INT ? redis->data.l : 0);
+		}
+	}
+
+	ret = REDIS_TRUE;
+
+end:
+	if(keys) free(keys);
+
+	return ret;
 }
 
 int redis_set(redis_t *redis, const char *key, const char *value) {
@@ -355,10 +383,10 @@ int redis_set(redis_t *redis, const char *key, const char *value) {
 int redis_get_ex(redis_t *redis, const char *key, char **value, int *size) {
 	if(!redis_send(redis, "ss", "GET", key)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
-	if(size) *size = redis->data.sz;
+	if(size) *size = (redis->data.c == REDIS_FLAG_BULK ? redis->data.sz : 0);
 	if(value) {
 		if(*value) free(*value);
-		if(redis->data.sz >= 0) {
+		if(redis->data.c == REDIS_FLAG_BULK && redis->data.sz >= 0) {
 			*value = redis->data.str;
 			redis->data.sz = 0;
 			redis->data.str = NULL;
@@ -376,7 +404,7 @@ int redis_get(redis_t *redis, const char *key, char **value) {
 int redis_incrby(redis_t *redis, const char *key, long int inc, long int *value) {
 	if(!redis_send(redis, "ssD", "incrby", key, inc)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
-	if(value) *value = redis->data.l;
+	if(value) *value = (redis->data.c == REDIS_FLAG_INT ? redis->data.l : 0);
 	return REDIS_TRUE;
 }
 
@@ -427,7 +455,7 @@ int redis_index_int(redis_t *redis, const char *key, int index, long int *value)
 	if(!redis_send(redis, "ssd", "lindex", key, index)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
 
-	if(redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
+	if(redis->data.c == REDIS_FLAG_BULK && redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
 	else *value = 0;
 
 	return REDIS_TRUE;
@@ -448,7 +476,7 @@ int redis_lpop_int(redis_t *redis, const char *key, long int *value) {
 	if(!redis_send(redis, "ss", "lpop", key)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
 
-	if(redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
+	if(redis->data.c == REDIS_FLAG_BULK && redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
 	else *value = 0;
 
 	return REDIS_TRUE;

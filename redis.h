@@ -62,6 +62,7 @@ redis_t *redis_init(redis_t *redis, int flag);
 
     int  redis_type(redis_t *redis, const char *key, char **rtype);
     int  redis_del(redis_t *redis, const char *key, int *exists);
+    int  redis_del_keys(redis_t *redis, const char *pattern, int *exists);
     int  redis_set(redis_t *redis, const char *key, const char *value);
     int  redis_get_ex(redis_t *redis, const char *key, char **value, int *size);
     int  redis_get(redis_t *redis, const char *key, char **value);
@@ -77,7 +78,7 @@ redis_t *redis_init(redis_t *redis, int flag);
     int redis_lpop_int(redis_t *redis, const char *key, long int *value);
 
    void  _redis_clean(redis_data_t *data);
-#define  redis_clean(redis)                  _redis_clean(&(redis)->data)
+#define  redis_clean(redis) _redis_clean(&(redis)->data)
     int  redis_close(redis_t *redis);
    void  redis_destory(redis_t *redis);
 
