@@ -76,6 +76,7 @@ redis_t *redis_init(redis_t *redis, int flag);
     int  redis_last_int(redis_t *redis, const char *key, long int *value);
     int  redis_rpush_int(redis_t *redis, const char *key, long int value);
     int  redis_lpop_int(redis_t *redis, const char *key, long int *value);
+    int  redis_blpop_int(redis_t *redis, const char *key, int timeout, long int *value);
     int  redis_lrem_keys(redis_t *redis, const char *pattern, long int value, int *exists);
 
    void  _redis_clean(redis_data_t *data);

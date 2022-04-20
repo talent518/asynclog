@@ -484,6 +484,17 @@ int redis_lpop_int(redis_t *redis, const char *key, long int *value) {
 	return REDIS_TRUE;
 }
 
+int redis_blpop_int(redis_t *redis, const char *key, int timeout, long int *value) {
+	if(!redis_send(redis, "ssd", "blpop", key, timeout)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_MULTI)) return REDIS_FALSE;
+
+	if(redis->data.c == REDIS_FLAG_MULTI && redis->data.sz == 2) {
+		*value = strtol(redis->data.data[1].str, NULL, 10);
+	} else *value = 0;
+
+	return REDIS_TRUE;
+}
+
 int redis_lrem_int(redis_t *redis, const char *key, int count, long int value) {
 	if(!redis_send(redis, "ssdD", "lrem", key, count, value)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
