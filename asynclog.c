@@ -496,10 +496,11 @@ PHP_RINIT_FUNCTION(asynclog) {
 	if(!sapi_module.phpinfo_as_text) {
 		sapi_header_line ctr = {0};
 
-		ctr.line_len = spprintf(&ctr.line, 0, "PID: %d/%d/%d", getpid(), getppid(), gettid());
+		ctr.line_len = spprintf(&ctr.line, 0, "PID: %d/%d", getpid(), getppid());
 		ctr.response_code = 0;
 
 		sapi_header_op(SAPI_HEADER_REPLACE, &ctr);
+		sapi_add_header("ASYNCLOG: 0", sizeof("ASYNCLOG: 0")-1, 1);
 		
 		ASYNCLOG_G(logs) = 0;
 	}
