@@ -71,7 +71,6 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 
 	// globals buffer
 	smart_str globals;
-	zend_long globals_len;
 
 	// response buffer
 	smart_str output;

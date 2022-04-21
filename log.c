@@ -184,7 +184,7 @@ void log_spost() {
 }
 
 log_status_t log_begin_request() {
-	return SUCCESS;
+	return begin_request_handler();
 }
 
 log_status_t log_push(const char *name, const char *category, const char *level, const char *message, const zend_string *data, double timestamp, double duration) {
