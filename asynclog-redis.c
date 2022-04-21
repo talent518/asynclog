@@ -42,7 +42,7 @@ int main(int argc, const char *argv[]) {
 	long int size = -1;
 	int opt, _optind;
 	int status = EXIT_SUCCESS;
-	int flag = 0, i, loop = 1;
+	int flag = 0, i, loop = 1, exists;
 	char **keys = NULL;
 	char *rtype = NULL;
 	char rtype2[32];
@@ -139,6 +139,42 @@ begin:
 
 	if(!redis_scan(&redis, 0, "*", 10)) goto end;
 	print_data(&redis.data);
+	
+	{
+		const char *argv[] = {"test3", "value3", "test4", "", "test5", "value5"};
+		const int argc = sizeof(argv)/sizeof(argv[0]);
+		const char *keyv[] = {"test3", "test4", "test5"};
+		const int keyc = sizeof(keyv)/sizeof(keyv[0]);
+		char *value[] = {NULL, NULL, NULL};
+		int size[] = {0, 0, 0};
+
+		if(!redis_mset(&redis, argc, argv)) goto end;
+		if(!redis_append(&redis, "test3", "-append")) goto end;
+		if(redis.data.c == REDIS_FLAG_INT) {
+			printf("************************************************************************************\n");
+			printf("redis_append: %ld\n", redis.data.l);
+		}
+		if(!redis_mget_ex(&redis, keyc, keyv, value, size)) goto end;
+		
+		if(redis.data.c == REDIS_FLAG_MULTI) {
+			printf("************************************************************************************\n");
+			for(i=0; i<keyc; i++) {
+				printf(" %d) $%d %s\n", i, size[i], value[i] ? value[i] : NULL);
+				if(value[i]) {
+					free(value[i]);
+					value[i] = NULL;
+				}
+			}
+		}
+		
+		if(!redis_del_ex(&redis, keyc, keyv, &exists)) goto end;
+		printf("************************************************************************************\n");
+		printf("redis_del_ex: %d\n", exists);
+	}
+	
+	if(!redis_del_keys(&redis, "*", &exists)) goto end;
+	printf("************************************************************************************\n");
+	printf("redis_del_keys: %d\n", exists);
 
 	if(optind < argc) {
 		for(i=optind; i<argc; i++) {
