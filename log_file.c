@@ -22,11 +22,21 @@ typedef struct _log_file_t {
 
 static log_file_t *head = NULL, *tail = NULL;
 static char filepath[PATH_MAX];
+static HashTable ht;
+
+static void free_fd(zval *z) {
+	if(Z_LVAL_P(z) >= 0) {
+		close(Z_LVAL_P(z));
+		ZVAL_LONG(z, -1);
+	}
+}
 
 log_status_t log_file_init() {
 	SYSLOG("FILE_INIT");
 
 	snprintf(filepath, sizeof(filepath), "%s", ASYNCLOG_G(filepath));
+	
+	zend_hash_init(&ht, 0, NULL, free_fd, 1);
 
 	return SUCCESS;
 }
@@ -42,23 +52,38 @@ log_status_t log_file_write() {
 
 	SYSLOG("FILE_WRITE3");
 
-	char file[PATH_MAX];
+	int fd, isclose = 0;
+	zval *zfd = zend_hash_str_find(&ht, p->name, strlen(p->name));
+	
+	if(zfd) {
+		fd = Z_LVAL_P(zfd);
+	} else {
+		char file[PATH_MAX];
 
-	snprintf(file, sizeof(file), "%s%s.log", filepath, p->name);
+	reopen:
+		snprintf(file, sizeof(file), "%s%s.log", filepath, p->name);
 
-	SYSLOG("FILEPATH: %s.log", file);
+		SYSLOG("FILEPATH: %s.log", file);
 
-	int fd = open(file, O_APPEND|O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+		fd = open(file, O_APPEND|O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+		if(fd >= 0) {
+			zval z;
+			ZVAL_LONG(&z, fd);
+			if(!zend_hash_str_update(&ht, p->name, strlen(p->name), &z)) {
+				isclose = 1;
+			}
+		}
+	}
 
-	if(fd > 0) {
+	if(fd >= 0) {
 		dprintf(fd, "[%s][%d]", sapi_module.name, getpid());
-		write(fd, p->data, p->size);
+		if(write(fd, p->data, p->size) < -1) goto reopen;
 		dprintf(fd, "\n==================================================================================================\n");
 
-		close(fd);
+		if(isclose) close(fd);
 	} else {
-		SYSLOG("Open file %s failure, errno is %d, strerror is %s\n", file, errno, strerror(errno));
-		fprintf(stderr, "Open file %s failure, errno is %d, strerror is %s\n", file, errno, strerror(errno));
+		SYSLOG("Open file %s%s.log failure, errno is %d, strerror is %s\n", filepath, p->name, errno, strerror(errno));
+		fprintf(stderr, "Open file %s%s.log failure, errno is %d, strerror is %s\n", filepath, p->name, errno, strerror(errno));
 	}
 
 	free(p);
@@ -122,5 +147,6 @@ log_status_t log_file_end_request(const char *ctlname, const zend_string *reques
 }
 
 log_status_t log_file_destroy() {
+	zend_hash_destroy(&ht);
 	return SUCCESS;
 }

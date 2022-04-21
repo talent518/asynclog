@@ -312,6 +312,18 @@ PHP_FUNCTION(asynclog) {
 		log_push(name, category, levelstr, message, NULL, timestamp, duration);
 	}
 
+
+#if ASYNCLOG_DEBUG
+	if(!sapi_module.phpinfo_as_text) {
+		sapi_header_line ctr = {0};
+
+		ctr.line_len = spprintf(&ctr.line, 0, "ASYNCLOG: %ld", ++ASYNCLOG_G(logs));
+		ctr.response_code = 0;
+
+		sapi_header_op(SAPI_HEADER_REPLACE, &ctr);
+	}
+#endif
+
 	RETURN_TRUE;
 }
 
@@ -478,16 +490,18 @@ PHP_RINIT_FUNCTION(asynclog) {
 		php_output_start_internal(ZEND_STRL("asynclog"), php_asynclog_output_handler, 0, PHP_OUTPUT_HANDLER_STDFLAGS);
 	}
 
-	log_begin_request();
+	// log_begin_request();
 
 #if ASYNCLOG_DEBUG
 	if(!sapi_module.phpinfo_as_text) {
 		sapi_header_line ctr = {0};
 
-		ctr.line_len = spprintf(&ctr.line, 0, "PID: %d/%d", getpid(), getppid());
+		ctr.line_len = spprintf(&ctr.line, 0, "PID: %d/%d/%d", getpid(), getppid(), gettid());
 		ctr.response_code = 0;
 
-		sapi_header_op(SAPI_HEADER_ADD, &ctr);
+		sapi_header_op(SAPI_HEADER_REPLACE, &ctr);
+		
+		ASYNCLOG_G(logs) = 0;
 	}
 #endif
 

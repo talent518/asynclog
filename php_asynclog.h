@@ -78,6 +78,8 @@ ZEND_BEGIN_MODULE_GLOBALS(asynclog)
 
 	char is_shutdown; // The php-fpm worker process pool is stoping or reloading
 	char is_signal;
+
+	zend_long logs;
 ZEND_END_MODULE_GLOBALS(asynclog)
 
 ZEND_EXTERN_MODULE_GLOBALS(asynclog);
