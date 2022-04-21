@@ -17,6 +17,11 @@
 #define REDIS_FLAG_BULK  '$'
 #define REDIS_FLAG_MULTI '*'
 
+typedef struct _redis_str_t {
+	int len;
+	const char *str;
+} redis_str_t;
+
 typedef struct _redis_data_t {
 	char c;
 	int sz;
@@ -62,10 +67,18 @@ redis_t *redis_init(redis_t *redis, int flag);
 
     int  redis_type(redis_t *redis, const char *key, char **rtype);
     int  redis_del(redis_t *redis, const char *key, int *exists);
+    int  redis_del_ex(redis_t *redis, int keyc, const char **keys, int *exists);
     int  redis_del_keys(redis_t *redis, const char *pattern, int *exists);
+    int  redis_set_ex(redis_t *redis, const char *key, const char *value, int size);
     int  redis_set(redis_t *redis, const char *key, const char *value);
+    int  redis_append_ex(redis_t *redis, const char *key, const char *value, int size);
+    int  redis_append(redis_t *redis, const char *key, const char *value);
     int  redis_get_ex(redis_t *redis, const char *key, char **value, int *size);
     int  redis_get(redis_t *redis, const char *key, char **value);
+    int  redis_mset_ex(redis_t *redis, int argc, const redis_str_t *argv);
+    int  redis_mset(redis_t *redis, int argc, const char **argv);
+    int  redis_mget_ex(redis_t *redis, int keyc, const char **keyv, char **value, int *size);
+    int  redis_mget(redis_t *redis, int keyc, const char **keyv, char **value);
     int  redis_incrby(redis_t *redis, const char *key, long int inc, long int *value);
 
     int  redis_multi(redis_t *redis);

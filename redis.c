@@ -91,15 +91,61 @@ int redis_send(redis_t *redis, const char *format, ...) {
 	REDIS_DEBUG printf("====================================================================================\n");
 
 	va_list ap;
-	int n;
+	int n, i, sz;
 	char dbuf[32];
 	const char *p = format, *ptr;
+	const char **strs;
+	const redis_str_t *ptrs;
 
 	n = strlen(format);
+	
+	va_start(ap, format);
+	while(*p) {
+		switch(*p) {
+			case 's':
+				va_arg(ap, const char*);
+				break;
+			case 'S':
+				va_arg(ap, const char*);
+				va_arg(ap, int);
+				break;
+			case 'd':
+				va_arg(ap, int);
+				break;
+			case 'D':
+				va_arg(ap, long int);
+				break;
+			case 'f':
+			case 'F':
+				va_arg(ap, double);
+				break;
+			case 'u':
+				va_arg(ap, unsigned int);
+				break;
+			case 'U':
+				va_arg(ap, unsigned long int);
+				break;
+			case 'v':
+				sz = va_arg(ap, int);
+				if(sz > 0) n += sz - 1; else n --;
+				va_arg(ap, const char**);
+				break;
+			case 'V':
+				sz = va_arg(ap, int);
+				if(sz > 0) n += sz - 1; else n --;
+				va_arg(ap, const redis_str_t*);
+				break;
+			default:
+				break;
+		}
+		p++;
+	}
+	va_end(ap);
 
 	REDIS_DEBUG printf("> *%d\n", n);
 	fprintf(redis->fp, "*%d\r\n", n);
 
+	p = format;
 	va_start(ap, format);
 	while (*p) {
 		switch(*p) {
@@ -131,6 +177,34 @@ int redis_send(redis_t *redis, const char *format, ...) {
 			CASE('F', F, "%lg", double)
 			CASE('u', u, "%u", unsigned int)
 			CASE('U', U, "%lu", unsigned long int)
+			case 'v':
+				sz = va_arg(ap, int);
+				strs = va_arg(ap, const char**);
+				for(i=0; i<sz; i++) {
+					ptr = strs[i];
+					if(ptr == NULL) ptr = "";
+					n = strlen(ptr);
+					REDIS_DEBUG printf("> $%d\n> %s\n", n, ptr);
+					fprintf(redis->fp, "$%d\r\n%s\r\n", n, ptr);
+				}
+				break;
+			case 'V':
+				sz = va_arg(ap, int);
+				ptrs = va_arg(ap, const redis_str_t*);
+				for(i=0; i<sz; i++) {
+					ptr = ptrs[i].str;
+					if(ptr == NULL) ptr = "";
+					n = ptrs[i].len;
+					REDIS_DEBUG {
+						printf("> $%d\n> ", n);
+						fwrite(ptr, 1, n, stdout);
+						printf("\n");
+					}
+					fprintf(redis->fp, "$%d\r\n", n);
+					fwrite(ptr, 1, n, redis->fp);
+					fprintf(redis->fp, "\r\n");
+				}
+				break;
 			default:
 				break;
 		}
@@ -340,7 +414,11 @@ int redis_type(redis_t *redis, const char *key, char **rtype) {
 }
 
 int redis_del(redis_t *redis, const char *key, int *exists) {
-	if(!redis_send(redis, "ss", "DEL", key)) return REDIS_FALSE;
+	return redis_del_ex(redis, 1, &key, exists);
+}
+
+int redis_del_ex(redis_t *redis, int keyc, const char **keys, int *exists) {
+	if(!redis_send(redis, "sv", "DEL", keyc, keys)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
 	if(exists) *exists = (redis->data.c == REDIS_FLAG_INT ? redis->data.l : 0);
 	return REDIS_TRUE;
@@ -357,15 +435,7 @@ int redis_del_keys(redis_t *redis, const char *pattern, int *exists) {
 	if(keys) {
 		for(k=0; keys[k]; k++);
 
-		if(k > 0) {
-			keys[k] = keys[0];
-			keys[0] = "del";
-
-			if(!redis_senda(redis, k+1, (const char **) keys)) goto end;
-			if(!redis_recv(redis, REDIS_FLAG_INT)) goto end;
-
-			if(exists) *exists = (redis->data.c == REDIS_FLAG_INT ? redis->data.l : 0);
-		}
+		if(k > 0 && !redis_del_ex(redis, k, (const char **) keys, exists)) goto end;
 	}
 
 	ret = REDIS_TRUE;
@@ -376,10 +446,24 @@ end:
 	return ret;
 }
 
-int redis_set(redis_t *redis, const char *key, const char *value) {
-	if(!redis_send(redis, "sss", "SET", key, value)) return REDIS_FALSE;
+int redis_set_ex(redis_t *redis, const char *key, const char *value, int size) {
+	if(!redis_send(redis, "ssS", "SET", key, value, size)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
 	return REDIS_TRUE;
+}
+
+int redis_set(redis_t *redis, const char *key, const char *value) {
+	return redis_set_ex(redis, key, value, strlen(value));
+}
+
+int redis_append_ex(redis_t *redis, const char *key, const char *value, int size) {
+	if(!redis_send(redis, "ssS", "APPEND", key, value, size)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
+	return REDIS_TRUE;
+}
+
+int redis_append(redis_t *redis, const char *key, const char *value) {
+	return redis_append_ex(redis, key, value, strlen(value));
 }
 
 int redis_get_ex(redis_t *redis, const char *key, char **value, int *size) {
@@ -401,6 +485,43 @@ int redis_get_ex(redis_t *redis, const char *key, char **value, int *size) {
 
 int redis_get(redis_t *redis, const char *key, char **value) {
 	return redis_get_ex(redis, key, value, NULL);
+}
+
+int redis_mset_ex(redis_t *redis, int argc, const redis_str_t *argv) {
+	if(!redis_send(redis, "sV", "MSET", argc, argv)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	return REDIS_TRUE;
+}
+
+int redis_mset(redis_t *redis, int argc, const char **argv) {
+	if(!redis_send(redis, "sv", "MSET", argc, argv)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_OK)) return REDIS_FALSE;
+	return REDIS_TRUE;
+}
+
+int redis_mget_ex(redis_t *redis, int keyc, const char **keyv, char **value, int *size) {
+	if(!redis_send(redis, "sv", "MGET", keyc, keyv)) return REDIS_FALSE;
+	if(!redis_recv(redis, REDIS_FLAG_MULTI)) return REDIS_FALSE;
+	if(redis->data.c == REDIS_FLAG_MULTI) {
+		int i;
+		if(size) {
+			for(i=0; i<redis->data.sz && i<keyc; i++) {
+				size[i] = redis->data.data[i].sz;
+			}
+		}
+		if(value) {
+			for(i=0; i<redis->data.sz && i<keyc; i++) {
+				value[i] = redis->data.data[i].str;
+				redis->data.data[i].str = NULL;
+				redis->data.data[i].sz = 0;
+			}
+		}
+	}
+	return REDIS_TRUE;
+}
+
+int redis_mget(redis_t *redis, int keyc, const char **keyv, char **value) {
+	return redis_mget_ex(redis, keyc, keyv, value, NULL);
 }
 
 int redis_incrby(redis_t *redis, const char *key, long int inc, long int *value) {
@@ -454,7 +575,7 @@ void _redis_clean(redis_data_t *data) {
 }
 
 int redis_index_int(redis_t *redis, const char *key, int index, long int *value) {
-	if(!redis_send(redis, "ssd", "lindex", key, index)) return REDIS_FALSE;
+	if(!redis_send(redis, "ssd", "LINDEX", key, index)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
 
 	if(redis->data.c == REDIS_FLAG_BULK && redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
@@ -468,14 +589,14 @@ int redis_last_int(redis_t *redis, const char *key, long int *value) {
 }
 
 int redis_rpush_int(redis_t *redis, const char *key, long int value) {
-	if(!redis_send(redis, "ssD", "rpush", key, value)) return REDIS_FALSE;
+	if(!redis_send(redis, "ssD", "RPUSH", key, value)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
 
 	return REDIS_TRUE;
 }
 
 int redis_lpop_int(redis_t *redis, const char *key, long int *value) {
-	if(!redis_send(redis, "ss", "lpop", key)) return REDIS_FALSE;
+	if(!redis_send(redis, "ss", "LPOP", key)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_BULK)) return REDIS_FALSE;
 
 	if(redis->data.c == REDIS_FLAG_BULK && redis->data.sz > 0) *value = strtol(redis->data.str, NULL, 10);
@@ -485,7 +606,7 @@ int redis_lpop_int(redis_t *redis, const char *key, long int *value) {
 }
 
 int redis_blpop_int(redis_t *redis, const char *key, int timeout, long int *value) {
-	if(!redis_send(redis, "ssd", "blpop", key, timeout)) return REDIS_FALSE;
+	if(!redis_send(redis, "ssd", "BLPOP", key, timeout)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_MULTI)) return REDIS_FALSE;
 
 	if(redis->data.c == REDIS_FLAG_MULTI && redis->data.sz == 2) {
@@ -496,7 +617,7 @@ int redis_blpop_int(redis_t *redis, const char *key, int timeout, long int *valu
 }
 
 int redis_lrem_int(redis_t *redis, const char *key, int count, long int value) {
-	if(!redis_send(redis, "ssdD", "lrem", key, count, value)) return REDIS_FALSE;
+	if(!redis_send(redis, "ssdD", "LREM", key, count, value)) return REDIS_FALSE;
 	if(!redis_recv(redis, REDIS_FLAG_INT)) return REDIS_FALSE;
 
 	return REDIS_TRUE;
